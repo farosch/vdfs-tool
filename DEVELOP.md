@@ -3,7 +3,7 @@
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (76 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 1 manifest-mode)
+cargo test --locked                  # all tests (79 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 1 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-unpack
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -12,6 +12,19 @@ cargo clippy --locked --all-targets  # lints (rustup component add clippy)
 The compressed-descriptor survey is ignored by default because it needs a real image. Run it with
 `VDFS1002_SURVEY_IMAGE=<image> cargo test --release --locked -- --ignored survey_compressed_descriptors --nocapture`.
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
+
+Focused decompression tests (layout 5, layout 6, digests and AES):
+`cargo test --locked --bin vdfs-unpack vdfs4::decompress`.
+Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
+signature blocks, corrupt stored hashes, and changed codec/size fields that
+must fail the digest check before decompression. The unhashed size-mismatch
+test continues to exercise the output-length check independently of hashing.
+
+To repeat the real-image layout-5 check, build the release binary and run
+`./target/release/vdfs-unpack /path/to/JazzM/section-6.bin -o /path/to/new-output`.
+The sample hash, reconciled byte offsets and recorded results are in
+[README.md](README.md#layout-5-descriptor-digest). The image is not committed;
+the regression fixtures are synthesized in Rust.
 
 Always pass `--locked`; `Cargo.lock` is pinned. CI (`.github/workflows/test.yml`)
 runs `cargo test --locked` on pull requests into `main` and `develop` and on
@@ -43,8 +56,11 @@ Coding rules (module layout, error handling, tests, comments) are in
     first byte selects the digest (`DigestAlgo::from_magic`): `C` none, `I`
     MD5, `H` SHA-1, `h` SHA-256. Chunk digests are checked in extent-table
     order, then the descriptor digest (computed with bytes 24..28 zeroed).
-  - Layout 2006 (`decompress_layout5`): chunk hashes are checked; descriptor
-    hash and signature are not.
+  - Layout 2006 (`decompress_layout5`): `h` chunk hashes are checked, then the
+    descriptor-prefix hash before decompression. The stored digest follows
+    the chunk-hash table and is SHA-256 of descriptor bytes `[0, 16)`, starting
+    at the magic. CRC at `[16, 20)`, later fields and signatures are not
+    verified. This differs from layout 6's full, CRC-zeroed descriptor hash.
   - Codecs: `Zip`, `Gzp`, and `Zst` (VDFS4 only) plus `Lzo`. `Lzo` is raw
     LZO1X in `src/lzo1x.rs`, a wrapper over the `lzo` crate. Each chunk is
     bounded by the bytes still expected for the file. Tests use liblzo2
