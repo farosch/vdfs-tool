@@ -42,11 +42,3 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   with fixtures. VDFS4 codec support does not establish their VDFS1002 form.
   No sampled retail VDFS4 image has yet supplied a valid `Lzo`, `Zst` or
   `Zhw` descriptor.
-
-## Device, FIFO and socket records
-
-- Add regression coverage for these record types in both extraction modes,
-  and validate against a real image containing them. The shared regular-file
-  output path is implemented, but current fixtures contain none of these
-  node types.
-

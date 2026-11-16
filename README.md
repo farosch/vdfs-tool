@@ -77,6 +77,11 @@ extraction, with the same names and contents. It also records every catalog
 entry in the manifest files above. Manifests contain raw extended-attribute
 values, so review them before sharing.
 
+VDFS4 device, FIFO and socket records are extracted as **regular files**, never
+as active host devices, pipes or sockets. Empty forks produce empty files;
+nonempty bodies follow the file extraction path. Manifest mode additionally
+preserves the original catalog record, including its mode and device metadata.
+
 ## VDFS1002 images
 
 `platform.img` and `data_backup.img` (HawkM) use the VDFS1002 format, detected by
@@ -264,6 +269,28 @@ ARM EXEC ELF with interpreter `/lib/ld-linux.so.3`. The earlier apparent
 "128 KB non-ELF prefix" came from treating concatenated members as one gzip
 stream. Restored links included `bin/sh -> bash` and
 `lib/ld-linux.so.3 -> ld-2.18.so`, and the restored mkfs ran under `qemu-arm`.
+
+### VDFS4 special-node validation
+
+Checked on 2026-11-16 using the same
+[JazzM section-6 sample](#layout-5-descriptor-digest):
+
+- Twelve character-device records under `root/dev`: `console`, `fb0`, `full`,
+  `null`, `ptmx`, `random`, `tty`, `tty0`, `tty1`, `tty2`, `urandom` and `zero`.
+- One FIFO: `root/usr/apps/org.tizen.services-fw/api/control`.
+- All thirteen forks declare zero bytes. Plain and manifest extraction both
+  produced empty regular files, not host special nodes or symlinks.
+- Every emitted manifest catalog record matched the saved original record
+  byte-for-byte, retaining the original node type and device metadata.
+
+The Rust regression in [tests/manifest_mode.rs](tests/manifest_mode.rs) covers
+FIFO, character-device, block-device and socket records, each with an empty
+and a nonempty binary inline body, in both modes. It checks regular-file
+output, exact contents, tree parity and unchanged manifest catalog bytes.
+The fixture is a temporary, in-memory mutation of `small-zlib.vdfs`; the
+committed fixture is unchanged, and no privileged node creation is needed.
+The JazzM sample has no block-device or socket records, so those types have
+synthetic coverage only.
 
 ### Reference-tool and source findings
 

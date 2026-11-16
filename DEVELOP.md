@@ -3,7 +3,7 @@
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (79 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 1 manifest-mode)
+cargo test --locked                  # all tests (79 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-unpack
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -25,6 +25,22 @@ To repeat the real-image layout-5 check, build the release binary and run
 The sample hash, reconciled byte offsets and recorded results are in
 [README.md](README.md#layout-5-descriptor-digest). The image is not committed;
 the regression fixtures are synthesized in Rust.
+
+Focused manifest and special-node tests:
+`cargo test --locked --test manifest_mode`.
+The node regression temporarily changes the `hello.txt` catalog record in
+`small-zlib.vdfs` into each of FIFO, character-device, block-device and socket,
+with empty and nonempty binary inline forks. Both extraction modes must write
+regular files with the exact fork contents, and manifest mode must preserve
+the original catalog record. No stored fixture or production code is changed.
+Real-image validation and its limits are recorded in
+[README.md](README.md#vdfs4-special-node-validation).
+
+To inspect the same real nodes, run the release binary on the documented
+JazzM sample with `--include root/dev` and
+`--include root/usr/apps/org.tizen.services-fw/api/control`, using a fresh
+output directory. Repeat with `--manifest-dir` pointing to a fresh metadata
+directory; compare the node outputs and the corresponding `ENTRY` records.
 
 Always pass `--locked`; `Cargo.lock` is pinned. CI (`.github/workflows/test.yml`)
 runs `cargo test --locked` on pull requests into `main` and `develop` and on
@@ -104,6 +120,8 @@ Coding rules (module layout, error handling, tests, comments) are in
   symlink creation. Manifest mode and plain mode share this code path.
 - `tests/manifest_mode.rs`: checks that manifest mode produces the same tree as
   plain mode on `small-zlib.vdfs`, including the symlink and its `LINK` row.
+  Also covers regular-file output and raw manifest metadata preservation for
+  all four special-node types using temporary fixture mutations.
 - Other `src/vdfs4/` files: `disk` (on-disk structs), `superblock`, `btree`,
   `cattree`, `extents`, `snapshot`, `reader` (image access).
 
