@@ -4,17 +4,18 @@ use anyhow::{Context, Result, bail};
 
 use super::codec::{compressed_descriptor, decompress_blob};
 use super::format::{
-    CATALOG_INODE, CatalogRecord, EXTENDED_OFFSET, EXTENDED_SIZE, EXTENT_INODE, EXTENT_KEY_SIZE,
-    EXTENT_RECORD_SIZE, Extent, KEY_FIXED_SIZE, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES,
-    META_EXTENT_COUNT, NODE_HEADER_SIZE, NODE_INDEX, NODE_LEAF, Node, Overflow, RECORD_FILE,
-    SECTOR_SIZE, SPECIAL_INODE_COUNT, SUPERBLOCK_OFFSET, Translation, file_extents, kernel_crc32,
-    le_u16, le_u32, le_u64, parse_fork, parse_mode, record, span,
+    CATALOG_INODE, CatalogRecord, EXTENDED_SIZE, EXTENT_INODE, EXTENT_KEY_SIZE, EXTENT_RECORD_SIZE,
+    Extent, KEY_FIXED_SIZE, LAYOUTS, Layout, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES, META_EXTENT_COUNT,
+    NODE_HEADER_SIZE, NODE_INDEX, NODE_LEAF, Node, Overflow, RECORD_FILE, SECTOR_SIZE,
+    SPECIAL_INODE_COUNT, Translation, file_extents, kernel_crc32, le_u16, le_u32, le_u64, parse_fork,
+    parse_mode, record, span,
 };
 
 pub struct Image<'a> {
     data: &'a [u8],
     block_size: u64,
     node_size: u64,
+    origin: u64,
     meta: Vec<Extent>,
     base_offset: u64,
     translation: Translation,
@@ -25,7 +26,18 @@ pub struct Image<'a> {
 
 impl<'a> Image<'a> {
     pub fn open(data: &'a [u8]) -> Result<Self> {
-        let superblock = span(data, SUPERBLOCK_OFFSET, SECTOR_SIZE)?;
+        let mut errors = Vec::new();
+        for layout in LAYOUTS {
+            match Self::open_layout(data, layout) {
+                Ok(image) => return Ok(image),
+                Err(error) => errors.push(format!("{error:#}")),
+            }
+        }
+        bail!("no VDFS1002 layout matched: {}", errors.join("; "));
+    }
+
+    fn open_layout(data: &'a [u8], layout: Layout) -> Result<Self> {
+        let superblock = span(data, layout.superblock, SECTOR_SIZE)?;
         if &superblock[0..4] != b"VDFS" || &superblock[4..8] != b"1002" {
             bail!("not a VDFS1002 superblock");
         }
@@ -38,7 +50,7 @@ impl<'a> Image<'a> {
             bail!("unsupported block or super-page order {log_block}/{log_super_page}");
         }
 
-        let extended = span(data, EXTENDED_OFFSET, EXTENDED_SIZE)?;
+        let extended = span(data, layout.extended, EXTENDED_SIZE)?;
         let extended_checksum_valid = kernel_crc32(&[&extended[..EXTENDED_SIZE as usize - 4]])
             == le_u32(extended, EXTENDED_SIZE as usize - 4)?;
         let meta = (0..META_EXTENT_COUNT)
@@ -54,6 +66,7 @@ impl<'a> Image<'a> {
             data,
             block_size: 1 << log_block,
             node_size: 1 << log_super_page,
+            origin: layout.origin,
             meta,
             base_offset: 0,
             translation: HashMap::new(),
@@ -73,6 +86,7 @@ impl<'a> Image<'a> {
     fn byte_offset(&self, block: u64) -> Result<u64> {
         block
             .checked_mul(self.block_size)
+            .and_then(|offset| offset.checked_add(self.origin))
             .with_context(|| format!("block {block} is out of range"))
     }
 

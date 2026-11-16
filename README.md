@@ -79,7 +79,7 @@ values, so review them before sharing.
 ## VDFS1002 images
 
 `platform.img` and `data_backup.img` (HawkM) use the VDFS1002 format, detected by
-the `VDFS1002` magic at offset 1024. For these images the default action is a
+the `VDFS1002` magic at offset 1024 or 1536 (the SDP1406 card layout). For these images the default action is a
 restore into `-o`. The read-only modes are:
 
 - `--list [--json] [--parent <ID>]` — print catalog records as

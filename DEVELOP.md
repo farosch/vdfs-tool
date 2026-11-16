@@ -57,7 +57,8 @@ Coding rules (module layout, error handling, tests, comments) are in
   the 16-byte `XT` table by the descriptor CRC, searching back up to
   `COMPRESSED_MAX_TABLE_GAP` (64 KiB) for padding before the descriptor.
   Written for this crate from the VDFS1002 format. `main.rs` dispatches to it
-  when the image starts with `VDFS1002` at offset 1024; the VDFS4 path is
+  when the image has a `VDFS1002` magic at a known superblock offset (1024 or
+  1536, see `LAYOUTS` in `src/vdfs1002/format.rs`); the VDFS4 path is
   taken otherwise. An image that matches neither is rejected unless `--force`
   is given, which warns on stderr and continues with VDFS4. `src/vdfs1002/cli.rs` holds its CLI handler (`run`). It restores a
   tree (`restore`): the catalog walk (inode 3),

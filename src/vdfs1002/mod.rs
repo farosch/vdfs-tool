@@ -21,9 +21,12 @@ pub use format::CatalogRecord;
 pub use image::Image;
 pub use restore::{restore, select_file};
 
-use format::SUPERBLOCK_OFFSET;
+use format::LAYOUTS;
 
-/// Only the first eight bytes at offset 0x400 are checked when detecting a VDFS1002 image.
+/// Checks only the first eight bytes at each known superblock position, so a layout that the open path would reject still detects.
 pub fn is_vdfs1002(image: &[u8]) -> bool {
-    image.get(SUPERBLOCK_OFFSET as usize..SUPERBLOCK_OFFSET as usize + 8) == Some(b"VDFS1002")
+    LAYOUTS.iter().any(|layout| {
+        let start = layout.superblock as usize;
+        image.get(start..start + 8) == Some(b"VDFS1002")
+    })
 }

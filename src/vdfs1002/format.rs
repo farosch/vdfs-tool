@@ -3,9 +3,30 @@ use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 
 pub(super) const SECTOR_SIZE: u64 = 512;
-pub(super) const SUPERBLOCK_OFFSET: u64 = 2 * SECTOR_SIZE;
-pub(super) const EXTENDED_OFFSET: u64 = 3 * SECTOR_SIZE;
 pub(super) const EXTENDED_SIZE: u64 = 5 * SECTOR_SIZE;
+
+/// Where a volume keeps its superblock and extended record, and the byte offset that block numbers are relative to.
+#[derive(Clone, Copy)]
+pub(super) struct Layout {
+    pub superblock: u64,
+    pub extended: u64,
+    pub origin: u64,
+}
+
+/// Candidate layouts, tried in order. The second matches SDP1406 hawkm p22, where the copy at 1024 is a
+/// mkfs header with invalid log fields and the valid copy is at 1536 with blocks relative to 1024.
+pub(super) const LAYOUTS: [Layout; 2] = [
+    Layout {
+        superblock: 2 * SECTOR_SIZE,
+        extended: 3 * SECTOR_SIZE,
+        origin: 0,
+    },
+    Layout {
+        superblock: 3 * SECTOR_SIZE,
+        extended: 5 * SECTOR_SIZE,
+        origin: 2 * SECTOR_SIZE,
+    },
+];
 pub(super) const META_EXTENT_COUNT: usize = 96;
 pub(super) const CATALOG_INODE: u64 = 3;
 pub(super) const EXTENT_INODE: u64 = 5;
