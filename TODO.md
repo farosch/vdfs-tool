@@ -11,9 +11,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   The public Linux 3.10.30 tree rejects `h`, while the sampled image contains
   3,291 such descriptors with matching SHA-256 chunk digests. Resolve this
   discrepancy before claiming device-side verification.
-- Establish and verify the layout-5 descriptor CRC. The checked
-  [descriptor-prefix digest](README.md#layout-5-descriptor-digest) excludes
-  the CRC and trailing fields; it does not validate them.
 - Identify and verify the hashed-descriptor signature trailers: signing key,
   signed bytes, algorithm and byte order. Separate a supplied-key consistency
   check from authentication against a trusted vendor anchor. The recorded

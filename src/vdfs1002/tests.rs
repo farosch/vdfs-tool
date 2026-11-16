@@ -3,9 +3,10 @@ use super::format::{
     COMPRESSED_CRC_OFFSET, COMPRESSED_DESCRIPTOR_SIZE, COMPRESSED_LAYOUT, COMPRESSED_TABLE_ENTRY,
     EXTENT_KEY_SIZE, EXTENT_RECORD_SIZE, Extent, FORK_SIZE, KEY_FIXED_SIZE, MAX_READ_BYTES,
     NODE_INDEX, NODE_LEAF, Overflow, RECORD_FILE, RECORD_FOLDER, RECORD_HARDLINK,
-    RECORD_INDIRECT_LINK, RECORD_MODE_OFFSET, file_extents, kernel_crc32,
+    RECORD_INDIRECT_LINK, RECORD_MODE_OFFSET, file_extents,
 };
 use super::*;
+use crate::crc::kernel_crc32;
 use crate::hex::decode as hex;
 use anyhow::Result;
 use flate2::Compression;
@@ -322,13 +323,6 @@ fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("vdfs1002-test-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     path
-}
-
-#[test]
-fn kernel_crc_matches_python_vectors() {
-    assert_eq!(kcrc(b"123456789"), 0x2dfd_2d88);
-    assert_eq!(kcrc(b""), 0);
-    assert_eq!(kcrc(b"hello world"), 0x66cd_a069);
 }
 
 #[test]

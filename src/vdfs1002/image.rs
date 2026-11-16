@@ -5,11 +5,12 @@ use anyhow::{Context, Result, bail};
 use super::codec::{compressed_descriptor, decompress_blob};
 use super::format::{
     CATALOG_INODE, CatalogRecord, EXTENDED_SIZE, EXTENT_INODE, EXTENT_KEY_SIZE, EXTENT_RECORD_SIZE,
-    Extent, KEY_FIXED_SIZE, LAYOUTS, Layout, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES, META_EXTENT_COUNT,
-    NODE_HEADER_SIZE, NODE_INDEX, NODE_LEAF, Node, Overflow, RECORD_FILE, SECTOR_SIZE,
-    SPECIAL_INODE_COUNT, Translation, file_extents, kernel_crc32, le_u16, le_u32, le_u64, parse_fork,
-    parse_mode, record, span,
+    Extent, KEY_FIXED_SIZE, LAYOUTS, Layout, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES,
+    META_EXTENT_COUNT, NODE_HEADER_SIZE, NODE_INDEX, NODE_LEAF, Node, Overflow, RECORD_FILE,
+    SECTOR_SIZE, SPECIAL_INODE_COUNT, Translation, file_extents, le_u16, le_u32, le_u64,
+    parse_fork, parse_mode, record, span,
 };
+use crate::crc::kernel_crc32;
 
 pub struct Image<'a> {
     data: &'a [u8],

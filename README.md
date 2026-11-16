@@ -12,8 +12,9 @@ Compressed files are verified when they carry digests. The descriptor magic's
 first byte selects the algorithm for layout 2007 files: `C` (none), `I` (MD5),
 `H` (SHA-1), or `h` (SHA-256). Per-chunk and descriptor digests must match, and
 a mismatch fails the file rather than writing unverified data. Layout-2006
-`h` files check chunk hashes and the SHA-256 of the 16-byte descriptor prefix;
-the CRC, remaining descriptor bytes and signature are not verified. The
+checks the metadata CRC for both `C` and `h` files; `h` additionally checks
+chunk hashes and the SHA-256 of the 16-byte descriptor prefix. Signatures
+remain unverified, and the CRC does not cover compressed payload bytes. The
 MD5/SHA-1 paths have byte-exact coverage from `mkfs.vdfs`-generated fixtures,
 but have not been confirmed against retail VDFS4 images.
 
@@ -26,7 +27,7 @@ Implementation status of VDFS types (checked = fully implemented and tested):
 | [x] | VDFS4 layout 5 (`VDFS2006`) | |
 | [x] | VDFS4 layout 6 (`VDFS2007`) | |
 | [x] | VDFS4 descriptor `C` (plain) | |
-| [ ] | VDFS4 descriptor `h` (SHA-256) | Layout 6: chunk and descriptor digests verified on real images (e.g. KTM2D, 5118 `h` descriptors); layout 5: chunk and 16-byte descriptor-prefix digests verified on JazzM (3291 `h` descriptors); signature not verified (no vendor key); public kernel has no `h` verifier |
+| [ ] | VDFS4 descriptor `h` (SHA-256) | Layout 6: chunk and descriptor digests verified on real images (e.g. KTM2D, 5118 `h` descriptors); layout 5: metadata CRC plus chunk and 16-byte descriptor-prefix digests verified on JazzM (3291 `h` descriptors); signature not verified (no vendor key); public kernel has no `h` verifier |
 | [ ] | VDFS4 descriptor `I` (MD5) | Restored from `mkfs.vdfs` output (`--sign-all=1 -h md5`); no real image; signature not verified |
 | [ ] | VDFS4 descriptor `H` (SHA-1) | Restored from `mkfs.vdfs` output (`--sign-all=1 -h sha1`); no real image; signature not verified |
 | [ ] | VDFS4 descriptor `F` (forced) | Rejected by `DigestAlgo::from_magic` |
@@ -184,8 +185,44 @@ aliases and did not create symlinks or special-node placeholder files, so
 the two trees are not identical.
 
 This closes descriptor-digest reconciliation, not authentication of the
-signature block or verification of the excluded CRC and trailing fields.
+signature block. The excluded CRC and trailing fields are checked separately
+by the metadata CRC described below.
 The runtime and tests are Rust-only; no external parser is required.
+
+### Layout-5 descriptor CRC
+
+Confirmed on 2026-11-16 using the same JazzM image identified above. A bounded
+Rust probe checked all 7,782 `C` and 3,291 `h` descriptors: all 11,073 matched
+this rule, with no zero-CRC exceptions:
+
+- Reflected CRC-32, polynomial `0xEDB88320`, initial value zero, no final
+  inversion. This is the kernel convention, not the ordinary zlib CRC.
+- Input starts at the first 16-byte `XT` chunk-table entry and ends after the
+  full 32-byte descriptor. Descriptor bytes `[16, 20)` relative to its magic
+  are treated as zero when computing the CRC, then compared with the stored
+  little-endian value in that field.
+- For `h`, this includes every chunk digest, the descriptor-prefix digest and
+  the signature block between the table and descriptor. It excludes the
+  compressed/stored payload before the table.
+
+The public reference
+[`vdfs4_calc_compext_table_crc`](https://github.com/hsand/vdfs4-linux/blob/8a692793c136154d212ca2da2bbbe32bbaae9800/linux/fs/vdfs4/inode.c#L3862)
+chains the kernel CRC over the table and a descriptor copy with its CRC zeroed.
+That corroborates the convention; the real-image results establish the
+layout-5 descriptor size and field offsets. Candidates using only 24
+descriptor bytes, omitting the hashed trailer, or using the ordinary zlib
+initial/final convention did not match the `h` corpus.
+
+The extractor now requires this CRC for layout-5 `C` and `h` before
+decompression. The full image still extracts with exit 0, 52,052 files and
+1,920 symlinks. Rust regressions cover altered table flags, signature bytes,
+stored CRC, chunk-size field and descriptor padding with 0/128/256-byte
+signature layouts. A separate test preserves the negative result: changing
+unhashed stored payload bytes does not invalidate the metadata CRC.
+
+CRC consistency is not RSA authentication or evidence of device-side
+enforcement. In particular, including signature bytes in a CRC does not
+verify the signature.
 
 ### Authentication reference evidence
 

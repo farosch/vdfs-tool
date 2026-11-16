@@ -150,15 +150,6 @@ pub(super) fn le_u64(data: &[u8], offset: usize) -> Result<u64> {
     Ok(u64::from_le_bytes(field(data, offset)?))
 }
 
-/// zlib-style CRC over the concatenated parts, with the kernel's init and final-XOR convention.
-pub(super) fn kernel_crc32(parts: &[&[u8]]) -> u32 {
-    let mut hasher = crc32fast::Hasher::new_with_initial(0xFFFF_FFFF);
-    for part in parts {
-        hasher.update(part);
-    }
-    hasher.finalize() ^ 0xFFFF_FFFF
-}
-
 pub(super) fn record<'a>(node: &Node<'a>, index: usize, key_minimum: usize) -> Result<&'a [u8]> {
     let data: &'a [u8] = node.data;
     let offset = node.offsets[index];

@@ -3,7 +3,7 @@
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (79 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo test --locked                  # all tests (81 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-unpack
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -19,6 +19,13 @@ Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
 signature blocks, corrupt stored hashes, and changed codec/size fields that
 must fail the digest check before decompression. The unhashed size-mismatch
 test continues to exercise the output-length check independently of hashing.
+
+Layout-5 CRC regressions cover the table, optional signature block, stored
+CRC, chunk-size field and padding, plus an unhashed payload change that the
+metadata CRC must not reject. To cover both users of the shared CRC helper:
+`cargo test --locked --bin vdfs-unpack -- vdfs4::decompress vdfs1002 crc::tests`.
+The CRC known-answer test lives in `src/crc.rs`; the VDFS1002 callers retain
+their existing checksum behavior.
 
 To repeat the real-image layout-5 check, build the release binary and run
 `./target/release/vdfs-unpack /path/to/JazzM/section-6.bin -o /path/to/new-output`.
@@ -66,6 +73,8 @@ Coding rules (module layout, error handling, tests, comments) are in
 - `src/cli.rs`: the shared `Cli` argument struct.
 - `src/lzo1x.rs`: LZO1X codec, shared by VDFS4 and VDFS1002.
 - `src/hex.rs`: shared hex helpers (`encode`; `decode` is test-only).
+- `src/crc.rs`: shared kernel-style CRC-32 for VDFS1002 structures and VDFS4
+  layout-5 compressed metadata (zero seed, no final inversion).
 - `src/vdfs4/mod.rs`: the VDFS4 pipeline (`run`). Submodules are listed below.
 - `src/vdfs4/decompress.rs`: compressed-file decoding.
   - Layout 2007 (`find_descriptor`, `decompress_blob`): the descriptor magic's
@@ -75,8 +84,11 @@ Coding rules (module layout, error handling, tests, comments) are in
   - Layout 2006 (`decompress_layout5`): `h` chunk hashes are checked, then the
     descriptor-prefix hash before decompression. The stored digest follows
     the chunk-hash table and is SHA-256 of descriptor bytes `[0, 16)`, starting
-    at the magic. CRC at `[16, 20)`, later fields and signatures are not
-    verified. This differs from layout 6's full, CRC-zeroed descriptor hash.
+    at the magic. Both `C` and `h` also check the kernel CRC over the table
+    through the full 32-byte descriptor, with its `[16, 20)` CRC field zeroed.
+    This includes the hashed trailer and descriptor padding, but excludes
+    chunk payloads. Signatures remain unverified. The prefix hash differs
+    from layout 6's full, CRC-zeroed descriptor hash.
   - Codecs: `Zip`, `Gzp`, and `Zst` (VDFS4 only) plus `Lzo`. `Lzo` is raw
     LZO1X in `src/lzo1x.rs`, a wrapper over the `lzo` crate. Each chunk is
     bounded by the bytes still expected for the file. Tests use liblzo2

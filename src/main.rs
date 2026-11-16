@@ -1,4 +1,5 @@
 mod cli;
+mod crc;
 mod hex;
 mod lzo1x;
 mod vdfs1002;
