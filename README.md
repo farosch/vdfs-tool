@@ -64,8 +64,7 @@ Supported packing codecs:
 - `zlib`
 - `gzip`
 - `zstd`
-
-LZO packing is not currently implemented.
+- `lzo`
 
 ## Supported formats
 

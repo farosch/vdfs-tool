@@ -2,13 +2,12 @@
 
 Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
 and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
-`gzip`, and `zstd` compression. LZO compression is currently rejected until a
-native encoder is implemented.
+`gzip`, `zstd`, and `lzo` compression.
 
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (81 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo test --locked                  # all tests (88 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)

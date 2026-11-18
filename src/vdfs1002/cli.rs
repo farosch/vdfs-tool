@@ -52,7 +52,12 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&logical)?;
         let compressed = encoder.finish()?;
-        eprintln!("TIF logical={} compressed={} object={}", logical.len(), compressed.len(), raw.len());
+        eprintln!(
+            "TIF logical={} compressed={} object={}",
+            logical.len(),
+            compressed.len(),
+            raw.len()
+        );
         let blob_size = raw.len();
         let table = blob_size - 48;
         if compressed.len() > table {

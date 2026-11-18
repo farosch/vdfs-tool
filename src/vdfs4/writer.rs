@@ -344,7 +344,7 @@ fn compress_inline(data: &[u8], compression: PackCompression) -> Result<Vec<u8>>
         PackCompression::Zstd => {
             zstd::stream::encode_all(data, 3).context("Zstd compression failed")
         }
-        PackCompression::Lzo => bail!("LZO compression is not implemented in the native writer"),
+        PackCompression::Lzo => Ok(rust_lzo1x::compress(data)),
         PackCompression::None => Ok(data.to_vec()),
     }
 }
@@ -587,5 +587,54 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&output);
         let _ = fs::remove_file(&image);
+    }
+
+    fn codec_round_trip(compression: PackCompression) {
+        let root = std::env::temp_dir().join(format!(
+            "vdfs-tool-{compression:?}-writer-{}",
+            std::process::id()
+        ));
+        let image = std::env::temp_dir().join(format!(
+            "vdfs-tool-{compression:?}-writer-{}.vdfs",
+            std::process::id()
+        ));
+        let output = std::env::temp_dir().join(format!(
+            "vdfs-tool-{compression:?}-output-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&output);
+        let _ = fs::remove_file(&image);
+        fs::create_dir_all(root.join("sub")).unwrap();
+
+        let data = (0..20 * 1024)
+            .map(|index| ((index * 37) % 251) as u8)
+            .collect::<Vec<_>>();
+        fs::write(root.join("sub/data.bin"), &data).unwrap();
+
+        write_image(&root, &image, compression).unwrap();
+        let bytes = fs::read(&image).unwrap();
+        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
+        assert_eq!(fs::read(output.join("sub/data.bin")).unwrap(), data);
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&output);
+        let _ = fs::remove_file(&image);
+    }
+
+    #[test]
+    fn gzip_round_trip_restores_large_file() {
+        codec_round_trip(PackCompression::Gzip);
+    }
+
+    #[test]
+    fn zstd_round_trip_restores_large_file() {
+        codec_round_trip(PackCompression::Zstd);
+    }
+
+    #[test]
+    fn lzo_round_trip_restores_large_file() {
+        codec_round_trip(PackCompression::Lzo);
     }
 }

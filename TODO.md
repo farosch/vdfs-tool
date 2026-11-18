@@ -5,11 +5,10 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 ## Packing
 
-- Implement native LZO compression and add layout-2007 round-trip coverage.
 - Add layout-2006 packing with the 32-byte descriptor format.
 - Add overflow-extent B-tree records for files requiring more than nine inline
   extents, hard-link records, xattrs, and complete mode/time metadata.
-- Validate gzip, zstd, and large multi-chunk blobs on confirmed device layouts.
+- Validate large multi-chunk blobs on confirmed device layouts.
 
 ## VDFS authentication
 
