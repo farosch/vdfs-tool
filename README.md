@@ -411,5 +411,4 @@ This project is distributed under the Apache License, Version 2.0. See the
 - https://github.com/HinTak/vdfs-tools
 - https://github.com/HinTak/vdfs-driver
 - https://github.com/theubusu/unixtract
-- https://github.com/gtors/vdfs-unpack (historical upstream PR reference)
 - https://sourceforge.net/projects/vdfs/
