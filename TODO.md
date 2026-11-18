@@ -5,8 +5,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 ## Packing
 
-- Validate native layout-2007 packing against retail images and the mkfs
-  implementation.
 - Implement native LZO compression and add layout-2007 round-trip coverage.
 - Add layout-2006 packing with the 32-byte descriptor format.
 - Add overflow-extent B-tree records for files requiring more than nine inline
@@ -23,8 +21,7 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   signed bytes, algorithm and byte order. Separate a supplied-key consistency
   check from authentication against a trusted vendor anchor. The recorded
   key searches have not established a verifier for these trailers.
-- Find retail VDFS2006/2007 samples with `I`, `H` or `F`, or explicitly accept
-  reference-tool-only coverage for `I`/`H`. `F` support needs a confirmed
+- Find retail VDFS2006/2007 samples with `F`. `F` support needs a confirmed
   format and regression fixture before implementation. VDFS1002 `I` samples
   do not establish VDFS4 `I` behavior.
 
