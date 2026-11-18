@@ -82,9 +82,9 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
           TARGET: ${{ matrix.target }}
         run: |
-          name="vdfs-unpack-${TAG}-${TARGET}"
-          bin="vdfs-unpack"
-          if [ "$RUNNER_OS" = "Windows" ]; then bin="vdfs-unpack.exe"; fi
+          name="vdfs-tool-${TAG}-${TARGET}"
+          bin="vdfs-tool"
+          if [ "$RUNNER_OS" = "Windows" ]; then bin="vdfs-tool.exe"; fi
           mkdir "$name"
           cp "target/${TARGET}/release/${bin}" README.md LICENSE "$name/"
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -122,5 +122,5 @@ jobs:
           gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "vdfs-unpack $TAG" \
+            --title "vdfs-tool $TAG" \
             --generate-notes

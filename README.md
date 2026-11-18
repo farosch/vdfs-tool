@@ -1,6 +1,6 @@
-# vdfs-unpack
+# vdfs-tool
 
-A Rust utility for unpacking **Samsung VDFS** filesystem images (`.img`) into a
+A Rust utility for packing and unpacking **Samsung VDFS** filesystem images (`.img`) and
 regular host directory. It supports VDFS4 with layout version **2006** or
 **2007**, and VDFS1002 (for example the HawkM `platform.img` and
 `data_backup.img`). The format is detected from the image. It decompresses
@@ -50,8 +50,22 @@ Implementation status of VDFS types (checked = fully implemented and tested):
 
 ```sh
 cargo build --release --locked
-./target/release/vdfs-unpack <image.img> -o <output_dir>
+./target/release/vdfs-tool unpack <image.img> -o <output_dir>
 ```
+
+Pack a directory into a native layout-2007 VDFS4 image:
+
+```sh
+./target/release/vdfs-tool pack <directory> -o <image.img>
+```
+Optional compression:
+
+```sh
+./target/release/vdfs-tool pack <directory> -o <image.img> --compression zlib
+```
+
+Supported native packing codecs are `none`, `zlib`, `gzip`, and `zstd`.
+`lzo` requires a confirmed native encoder and is currently rejected.
 
 Arguments:
 
@@ -397,5 +411,5 @@ This project is distributed under the Apache License, Version 2.0. See the
 - https://github.com/HinTak/vdfs-tools
 - https://github.com/HinTak/vdfs-driver
 - https://github.com/theubusu/unixtract
-- https://github.com/gtors/vdfs-unpack
+- https://github.com/gtors/vdfs-unpack (historical upstream PR reference)
 - https://sourceforge.net/projects/vdfs/

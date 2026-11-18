@@ -13,8 +13,8 @@ fn run(name: &str, input: &Path, extra: &[&Path]) -> PathBuf {
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&out);
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vdfs-unpack"));
-    cmd.arg(input).arg("-o").arg(&out);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"));
+    cmd.arg("unpack").arg(input).arg("-o").arg(&out);
     for path in extra {
         cmd.arg("--manifest-dir").arg(path);
     }

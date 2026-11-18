@@ -1,11 +1,13 @@
 use super::{Image, select_file};
-use crate::cli::Cli;
+use crate::cli::UnpackArgs;
+use crate::crc::kernel_crc32;
 use anyhow::{Context, Result, bail};
+use flate2::{Compression, write::ZlibEncoder};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 
-pub(crate) fn run(image_bytes: &[u8], args: &Cli) -> Result<()> {
+pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     let modes = [args.audit, args.list, args.extract.is_some()]
         .iter()
         .filter(|set| **set)
@@ -20,6 +22,79 @@ pub(crate) fn run(image_bytes: &[u8], args: &Cli) -> Result<()> {
         && (!args.include.is_empty() || args.manifest_dir.is_some() || args.aes_key.is_some())
     {
         bail!("--include, --manifest-dir and --aes-key are not supported for VDFS1002 images");
+    }
+
+    if args.patch_tif {
+        let output = args
+            .output
+            .as_deref()
+            .context("--patch-tif requires -o/--output")?;
+        if output.exists() {
+            bail!("patch output already exists: {}", output.display());
+        }
+        let catalog_copy = image_bytes.to_vec();
+        let catalog_reader = Image::open(&catalog_copy)?;
+        let records = catalog_reader.catalog_records()?;
+        let record = select_file(&records, "TIFSDaemon", None)?;
+        let overflow = catalog_reader.overflow_extents()?;
+        let raw = catalog_reader.read_file(record, &overflow, 256 << 20)?;
+        let mut logical = catalog_reader.file_contents(record, &overflow)?;
+        let at_count = 0x83a8eusize;
+        let at_bmi = 0x83a92usize;
+        if logical.get(at_count..at_count + 2) != Some(&b"\x00\x2b"[..])
+            || logical.get(at_bmi..at_bmi + 2) != Some(&b"\x35\xdd"[..])
+        {
+            bail!("TIFSDaemon ELF bytes do not match the pinned original guard");
+        }
+        logical[at_count..at_count + 2].copy_from_slice(b"\x00\x29");
+        logical[at_bmi..at_bmi + 2].copy_from_slice(b"\x35\xd4");
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&logical)?;
+        let compressed = encoder.finish()?;
+        eprintln!("TIF logical={} compressed={} object={}", logical.len(), compressed.len(), raw.len());
+        let blob_size = raw.len();
+        let table = blob_size - 48;
+        if compressed.len() > table {
+            bail!(
+                "patched compressed blob needs {} bytes, but original object has {} bytes before the table",
+                compressed.len(),
+                table,
+            );
+        }
+        let mut blob = vec![0u8; blob_size];
+        blob[..compressed.len()].copy_from_slice(&compressed);
+        blob[table..table + 2].copy_from_slice(b"XT");
+        blob[table + 2..table + 4].copy_from_slice(&0u16.to_le_bytes());
+        blob[table + 4..table + 8].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+        blob[table + 8..table + 16].copy_from_slice(&0u64.to_le_bytes());
+        let descriptor = table + 16;
+        blob[descriptor..descriptor + 4].copy_from_slice(b"CZip");
+        blob[descriptor + 4..descriptor + 6].copy_from_slice(&1u16.to_le_bytes());
+        blob[descriptor + 6..descriptor + 8].copy_from_slice(&4u16.to_le_bytes());
+        blob[descriptor + 8..descriptor + 16]
+            .copy_from_slice(&(logical.len() as u64).to_le_bytes());
+        blob[descriptor + 16..descriptor + 20].fill(0);
+        blob[descriptor + 20..descriptor + 24].copy_from_slice(&17u32.to_le_bytes());
+        blob[descriptor + 24..descriptor + 32].fill(0);
+        let descriptor_zeroed = blob[descriptor..descriptor + 32].to_vec();
+        let mut tail = vec![0u8; 32];
+        tail.copy_from_slice(&descriptor_zeroed);
+        tail[16..20].fill(0);
+        let crc = kernel_crc32(&[&blob[table..descriptor], &tail]);
+        blob[descriptor + 16..descriptor + 20].copy_from_slice(&crc.to_le_bytes());
+        let written = catalog_reader.replace_file_blob(record, &overflow, image_bytes, &blob)?;
+        std::fs::write(output, image_bytes)
+            .with_context(|| format!("Failed to write patched image: {}", output.display()))?;
+        println!(
+            "{}",
+            serde_json::json!({
+                "output": output.display().to_string(),
+                "file": "TIFSDaemon",
+                "patched_bytes": written,
+            })
+        );
+        return Ok(());
     }
 
     let reader = Image::open(image_bytes)?;

@@ -11,7 +11,8 @@ const FIXTURE_SHA256: &str = "9c2dc702e85f4a3741f7aa9ed56673fd91fc7142a791e38763
 fn extract_fixture(name: &str) -> PathBuf {
     let out = std::env::temp_dir().join(format!("vdfs-unpack-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
-    let status = Command::new(env!("CARGO_BIN_EXE_vdfs-unpack"))
+    let status = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
         .arg(FIXTURE)
         .arg("-o")
         .arg(&out)

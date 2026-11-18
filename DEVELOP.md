@@ -1,10 +1,15 @@
-# Developing vdfs-unpack
+# Developing vdfs-tool
+
+Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
+and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
+`gzip`, and `zstd` compression. LZO compression is currently rejected until a
+native encoder is implemented.
 
 ## Test and build
 
 ```sh
 cargo test --locked                  # all tests (81 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
-cargo build --release --locked       # ./target/release/vdfs-unpack
+cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
 ```
@@ -14,7 +19,7 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
 Focused decompression tests (layout 5, layout 6, digests and AES):
-`cargo test --locked --bin vdfs-unpack vdfs4::decompress`.
+`cargo test --locked --bin vdfs-tool vdfs4::decompress`.
 Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
 signature blocks, corrupt stored hashes, and changed codec/size fields that
 must fail the digest check before decompression. The unhashed size-mismatch
@@ -23,12 +28,12 @@ test continues to exercise the output-length check independently of hashing.
 Layout-5 CRC regressions cover the table, optional signature block, stored
 CRC, chunk-size field and padding, plus an unhashed payload change that the
 metadata CRC must not reject. To cover both users of the shared CRC helper:
-`cargo test --locked --bin vdfs-unpack -- vdfs4::decompress vdfs1002 crc::tests`.
+`cargo test --locked --bin vdfs-tool -- vdfs4::decompress vdfs1002 crc::tests`.
 The CRC known-answer test lives in `src/crc.rs`; the VDFS1002 callers retain
 their existing checksum behavior.
 
 To repeat the real-image layout-5 check, build the release binary and run
-`./target/release/vdfs-unpack /path/to/JazzM/section-6.bin -o /path/to/new-output`.
+`./target/release/vdfs-tool unpack /path/to/JazzM/section-6.bin -o /path/to/new-output`.
 The sample hash, reconciled byte offsets and recorded results are in
 [README.md](README.md#layout-5-descriptor-digest). The image is not committed;
 the regression fixtures are synthesized in Rust.
@@ -55,7 +60,7 @@ pushes to `develop`. A pull request into `main` must come from `develop`; the
 `verify-source` job fails otherwise.
 
 Release (`.github/workflows/release.yml`) runs on every push to `main`. It runs
-the tests, then builds `vdfs-unpack` for `x86_64-unknown-linux-gnu`,
+the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
 `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` and `x86_64-apple-darwin`. It
 publishes a GitHub release tagged `v<version>` from the `version` field in
 `Cargo.toml`. If that tag already exists, the release is skipped, so bump the

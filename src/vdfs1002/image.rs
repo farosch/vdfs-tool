@@ -323,6 +323,123 @@ impl<'a> Image<'a> {
         }
     }
 
+    pub fn replace_file_blob(
+        &self,
+        record: &CatalogRecord,
+        overflow: &Overflow,
+        image: &mut [u8],
+        replacement: &[u8],
+    ) -> Result<usize> {
+        if replacement.len() as u64 > record.size {
+            bail!(
+                "replacement size {} exceeds original file size {}",
+                replacement.len(),
+                record.size,
+            );
+        }
+        let mut logical = 0u64;
+        let mut written = 0usize;
+        for extent in file_extents(record, overflow)? {
+            let extent_bytes = extent.length.saturating_mul(self.block_size);
+            let remaining = replacement.len().saturating_sub(written);
+            let take = remaining.min(extent_bytes as usize);
+            if take > 0 {
+                let absolute = extent
+                    .begin
+                    .saturating_mul(self.block_size)
+                    .checked_add(self.origin)
+                    .context("replacement physical offset overflows")?;
+                let start = absolute as usize;
+                let end = start
+                    .checked_add(take)
+                    .context("replacement range overflows")?;
+                if end > image.len() {
+                    bail!("replacement range extends beyond the VDFS image");
+                }
+                image[start..end].copy_from_slice(&replacement[written..written + take]);
+                written += take;
+            }
+            let padding = extent_bytes as usize - take;
+            if padding > 0 && written < replacement.len() {
+                logical = logical.saturating_add(extent_bytes);
+                continue;
+            }
+            if take > 0 {
+                logical = logical.saturating_add(take as u64);
+            }
+        }
+        Ok(written)
+    }
+
+    /// Replace same-size bytes in an uncompressed file while preserving every
+    /// catalog and extent record.
+    pub fn patch_uncompressed_file(
+        &self,
+        record: &CatalogRecord,
+        overflow: &Overflow,
+        image: &mut [u8],
+        offset: u64,
+        original: &[u8],
+        replacement: &[u8],
+    ) -> Result<usize> {
+        if original.len() != replacement.len() {
+            bail!("TIF patch replacement must preserve file size");
+        }
+        let end = offset
+            .checked_add(original.len() as u64)
+            .context("patch range overflows")?;
+        if end > record.size {
+            bail!(
+                "patch range {}..{} exceeds file size {}",
+                offset,
+                end,
+                record.size
+            );
+        }
+        let blob = self.read_file(record, overflow, MAX_READ_BYTES)?;
+        if compressed_descriptor(&blob)?.is_some() {
+            bail!("TIFSDaemon is compressed; in-place patching is unsafe");
+        }
+        if blob.get(offset as usize..end as usize) != Some(original) {
+            bail!("TIFSDaemon bytes do not match the pinned original bytes");
+        }
+
+        let mut logical = offset;
+        let mut patched = 0usize;
+        for extent in file_extents(record, overflow)? {
+            let extent_bytes = extent.length.saturating_mul(self.block_size);
+            let extent_end = logical.saturating_add(extent_bytes);
+            let patch_start = logical.max(offset);
+            let patch_end = extent_end.min(end);
+            if patch_start < patch_end {
+                let within = patch_start - logical;
+                let absolute = extent
+                    .begin
+                    .saturating_mul(self.block_size)
+                    .checked_add(self.origin)
+                    .and_then(|base| base.checked_add(within))
+                    .context("patch physical offset overflows")?;
+                let length = (patch_end - patch_start) as usize;
+                let image_start = absolute as usize;
+                let image_end = image_start
+                    .checked_add(length)
+                    .context("patch image range overflows")?;
+                if image_end > image.len() {
+                    bail!("patch range extends beyond the VDFS image");
+                }
+                let source_start = (patch_start - offset) as usize;
+                image[image_start..image_end]
+                    .copy_from_slice(&replacement[source_start..source_start + length]);
+                patched += length;
+            }
+            logical = extent_end;
+        }
+        if patched != replacement.len() {
+            bail!("patched {} bytes, expected {}", patched, replacement.len());
+        }
+        Ok(patched)
+    }
+
     /// Summarise how far the catalog reaches and whether file forks agree with their sizes.
     pub fn audit(&self, records: &[CatalogRecord]) -> Result<Audit> {
         let files: Vec<&CatalogRecord> = records

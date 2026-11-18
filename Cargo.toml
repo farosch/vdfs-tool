@@ -1,5 +1,5 @@
 [package]
-name = "vdfs-unpack"
+name = "vdfs-tool"
 version = "0.1.2"
 edition = "2024"
 description = "Samsung VDFS4 and VDFS1002 filesystem image unpacker"

@@ -3,10 +3,25 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "vdfs-unpack",
-    about = "Extract Samsung VDFS4 and VDFS1002 filesystem images"
+    name = "vdfs-tool",
+    about = "Pack and unpack Samsung VDFS filesystem images",
+    version
 )]
 pub(crate) struct Cli {
+    #[command(subcommand)]
+    pub(crate) command: Command,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum Command {
+    /// Extract a Samsung VDFS4 or VDFS1002 filesystem image.
+    Unpack(UnpackArgs),
+    /// Create a Samsung VDFS4 filesystem image.
+    Pack(PackArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct UnpackArgs {
     /// Path to the VDFS image (VDFS4 or VDFS1002).
     pub(crate) input: PathBuf,
 
@@ -49,4 +64,31 @@ pub(crate) struct Cli {
     /// VDFS1002: with --list or --extract, only match records whose parent object id is this.
     #[arg(long)]
     pub(crate) parent: Option<u64>,
+
+    /// VDFS1002: write an in-place TIFSDaemon negative-index patch to -o.
+    #[arg(long)]
+    pub(crate) patch_tif: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct PackArgs {
+    /// Directory to pack.
+    pub(crate) input: PathBuf,
+
+    /// Output VDFS4 image path.
+    #[arg(short = 'o', long = "output")]
+    pub(crate) output: Option<PathBuf>,
+
+    /// Compression codec.
+    #[arg(long, value_enum, default_value = "none")]
+    pub(crate) compression: PackCompression,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PackCompression {
+    None,
+    Zlib,
+    Gzip,
+    Lzo,
+    Zstd,
 }
