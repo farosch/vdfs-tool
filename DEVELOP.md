@@ -57,7 +57,8 @@ directory; compare the node outputs and the corresponding `ENTRY` records.
 Always pass `--locked`; `Cargo.lock` is pinned. CI (`.github/workflows/test.yml`)
 runs `cargo test --locked` on pull requests into `main` and `develop` and on
 pushes to `develop`. A pull request into `main` must come from `develop`; the
-`verify-source` job fails otherwise.
+`verify-source` job always runs and reports success outside that rule or fails
+otherwise.
 
 Release (`.github/workflows/release.yml`) runs on every push to `main`. It runs
 the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
