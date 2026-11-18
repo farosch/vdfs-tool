@@ -1,8 +1,6 @@
 # Open work
 
-Only unresolved implementation and validation work belongs here. Recorded
-corpus observations, reference-source findings and closed investigation results
-are in [README.md](README.md#research-evidence-and-limits). Test commands and
+Only unresolved implementation and validation work belongs here. Test commands and
 fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 ## Packing
