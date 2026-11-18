@@ -4,10 +4,15 @@ Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
 and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
 `gzip`, `zstd`, and `lzo` compression.
 
+VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
+v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
+SHA-1, SHA-256, RSA1024, and RSA2048 descriptor trailers. It does not provide
+vendor trust enrollment or verify superblock signatures.
+
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (88 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo test --locked                  # all tests (91 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)

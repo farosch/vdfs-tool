@@ -1,3 +1,4 @@
+pub(crate) mod authentication;
 mod btree;
 mod cattree;
 mod decompress;
@@ -43,6 +44,9 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
             .try_into()
             .with_context(|| format!("AES key must be exactly 16 bytes: {}", key_path.display()))?;
         reader.aes_key = Some(key);
+    }
+    if let Some(public_key_path) = args.public_key.as_deref() {
+        reader.rsa_public_key = Some(authentication::read_public_key(public_key_path)?);
     }
 
     println!("VDFS4 Image Info:");

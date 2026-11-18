@@ -19,9 +19,14 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         bail!("--parent needs --list or --extract");
     }
     if modes == 0
-        && (!args.include.is_empty() || args.manifest_dir.is_some() || args.aes_key.is_some())
+        && (!args.include.is_empty()
+            || args.manifest_dir.is_some()
+            || args.aes_key.is_some()
+            || args.public_key.is_some())
     {
-        bail!("--include, --manifest-dir and --aes-key are not supported for VDFS1002 images");
+        bail!(
+            "--include, --manifest-dir, --aes-key and --public-key are not supported for VDFS1002 images"
+        );
     }
 
     if args.patch_tif {

@@ -34,6 +34,7 @@ When `-o` is omitted, the output directory defaults to
 - `--include <PATH>`: extract only an image path. May be repeated.
 - `--manifest-dir <DIR>`: write VDFS4 catalog and xattr metadata files.
 - `--aes-key <FILE>`: supply a 16-byte AES-128 key for encrypted VDFS4 chunks.
+- `--public-key <FILE>`: verify hashed VDFS4 descriptor signatures with a PEM RSA public key.
 - `--force`: try VDFS4 extraction for an unrecognized image.
 
 VDFS1002-specific read options include:

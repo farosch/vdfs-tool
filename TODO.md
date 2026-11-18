@@ -16,10 +16,8 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   The public Linux 3.10.30 tree rejects `h`, while the sampled image contains
   3,291 such descriptors with matching SHA-256 chunk digests. Resolve this
   discrepancy before claiming device-side verification.
-- Identify and verify the hashed-descriptor signature trailers: signing key,
-  signed bytes, algorithm and byte order. Separate a supplied-key consistency
-  check from authentication against a trusted vendor anchor. The recorded
-  key searches have not established a verifier for these trailers.
+- Implement and validate VDFS4 superblock RSA signature verification and a
+  vendor trust anchor. Supplied descriptor-public-key verification is complete.
 - Find retail VDFS2006/2007 samples with `F`. `F` support needs a confirmed
   format and regression fixture before implementation. VDFS1002 `I` samples
   do not establish VDFS4 `I` behavior.

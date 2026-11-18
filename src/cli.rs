@@ -41,6 +41,10 @@ pub(crate) struct UnpackArgs {
     #[arg(long = "aes-key")]
     pub(crate) aes_key: Option<PathBuf>,
 
+    /// PEM RSA public key used to verify hashed VDFS4 descriptor signatures.
+    #[arg(long = "public-key")]
+    pub(crate) public_key: Option<PathBuf>,
+
     /// Try VDFS4 extraction on an image that is not a recognized VDFS1002 or VDFS4 image.
     #[arg(long)]
     pub(crate) force: bool,
