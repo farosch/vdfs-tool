@@ -11,11 +11,14 @@ permissions:
 
 jobs:
   verify-source:
-    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Require develop as the source branch
         run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.base_ref }}" != "main" ]; then
+            echo "::notice::Source branch check applies only to pull requests into main."
+            exit 0
+          fi
           if [ "${{ github.head_ref }}" != "develop" ]; then
             echo "::error::Pull requests into main must come from develop (got '${{ github.head_ref }}')."
             exit 1

@@ -4,17 +4,19 @@ use anyhow::{Context, Result, bail};
 
 use super::codec::{compressed_descriptor, decompress_blob};
 use super::format::{
-    CATALOG_INODE, CatalogRecord, EXTENDED_OFFSET, EXTENDED_SIZE, EXTENT_INODE, EXTENT_KEY_SIZE,
-    EXTENT_RECORD_SIZE, Extent, KEY_FIXED_SIZE, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES,
+    CATALOG_INODE, CatalogRecord, EXTENDED_SIZE, EXTENT_INODE, EXTENT_KEY_SIZE, EXTENT_RECORD_SIZE,
+    Extent, KEY_FIXED_SIZE, LAYOUTS, Layout, MAX_BASE_TABLE_SIZE, MAX_READ_BYTES,
     META_EXTENT_COUNT, NODE_HEADER_SIZE, NODE_INDEX, NODE_LEAF, Node, Overflow, RECORD_FILE,
-    SECTOR_SIZE, SPECIAL_INODE_COUNT, SUPERBLOCK_OFFSET, Translation, file_extents, kernel_crc32,
-    le_u16, le_u32, le_u64, parse_fork, parse_mode, record, span,
+    SECTOR_SIZE, SPECIAL_INODE_COUNT, Translation, file_extents, le_u16, le_u32, le_u64,
+    parse_fork, parse_mode, record, span,
 };
+use crate::crc::kernel_crc32;
 
 pub struct Image<'a> {
     data: &'a [u8],
     block_size: u64,
     node_size: u64,
+    origin: u64,
     meta: Vec<Extent>,
     base_offset: u64,
     translation: Translation,
@@ -25,7 +27,18 @@ pub struct Image<'a> {
 
 impl<'a> Image<'a> {
     pub fn open(data: &'a [u8]) -> Result<Self> {
-        let superblock = span(data, SUPERBLOCK_OFFSET, SECTOR_SIZE)?;
+        let mut errors = Vec::new();
+        for layout in LAYOUTS {
+            match Self::open_layout(data, layout) {
+                Ok(image) => return Ok(image),
+                Err(error) => errors.push(format!("{error:#}")),
+            }
+        }
+        bail!("no VDFS1002 layout matched: {}", errors.join("; "));
+    }
+
+    fn open_layout(data: &'a [u8], layout: Layout) -> Result<Self> {
+        let superblock = span(data, layout.superblock, SECTOR_SIZE)?;
         if &superblock[0..4] != b"VDFS" || &superblock[4..8] != b"1002" {
             bail!("not a VDFS1002 superblock");
         }
@@ -38,7 +51,7 @@ impl<'a> Image<'a> {
             bail!("unsupported block or super-page order {log_block}/{log_super_page}");
         }
 
-        let extended = span(data, EXTENDED_OFFSET, EXTENDED_SIZE)?;
+        let extended = span(data, layout.extended, EXTENDED_SIZE)?;
         let extended_checksum_valid = kernel_crc32(&[&extended[..EXTENDED_SIZE as usize - 4]])
             == le_u32(extended, EXTENDED_SIZE as usize - 4)?;
         let meta = (0..META_EXTENT_COUNT)
@@ -54,6 +67,7 @@ impl<'a> Image<'a> {
             data,
             block_size: 1 << log_block,
             node_size: 1 << log_super_page,
+            origin: layout.origin,
             meta,
             base_offset: 0,
             translation: HashMap::new(),
@@ -73,6 +87,7 @@ impl<'a> Image<'a> {
     fn byte_offset(&self, block: u64) -> Result<u64> {
         block
             .checked_mul(self.block_size)
+            .and_then(|offset| offset.checked_add(self.origin))
             .with_context(|| format!("block {block} is out of range"))
     }
 
@@ -306,6 +321,123 @@ impl<'a> Image<'a> {
             None => Ok(blob),
             Some(descriptor) => decompress_blob(&blob, &descriptor),
         }
+    }
+
+    pub fn replace_file_blob(
+        &self,
+        record: &CatalogRecord,
+        overflow: &Overflow,
+        image: &mut [u8],
+        replacement: &[u8],
+    ) -> Result<usize> {
+        if replacement.len() as u64 > record.size {
+            bail!(
+                "replacement size {} exceeds original file size {}",
+                replacement.len(),
+                record.size,
+            );
+        }
+        let mut logical = 0u64;
+        let mut written = 0usize;
+        for extent in file_extents(record, overflow)? {
+            let extent_bytes = extent.length.saturating_mul(self.block_size);
+            let remaining = replacement.len().saturating_sub(written);
+            let take = remaining.min(extent_bytes as usize);
+            if take > 0 {
+                let absolute = extent
+                    .begin
+                    .saturating_mul(self.block_size)
+                    .checked_add(self.origin)
+                    .context("replacement physical offset overflows")?;
+                let start = absolute as usize;
+                let end = start
+                    .checked_add(take)
+                    .context("replacement range overflows")?;
+                if end > image.len() {
+                    bail!("replacement range extends beyond the VDFS image");
+                }
+                image[start..end].copy_from_slice(&replacement[written..written + take]);
+                written += take;
+            }
+            let padding = extent_bytes as usize - take;
+            if padding > 0 && written < replacement.len() {
+                logical = logical.saturating_add(extent_bytes);
+                continue;
+            }
+            if take > 0 {
+                logical = logical.saturating_add(take as u64);
+            }
+        }
+        Ok(written)
+    }
+
+    /// Replace same-size bytes in an uncompressed file while preserving every
+    /// catalog and extent record.
+    pub fn patch_uncompressed_file(
+        &self,
+        record: &CatalogRecord,
+        overflow: &Overflow,
+        image: &mut [u8],
+        offset: u64,
+        original: &[u8],
+        replacement: &[u8],
+    ) -> Result<usize> {
+        if original.len() != replacement.len() {
+            bail!("TIF patch replacement must preserve file size");
+        }
+        let end = offset
+            .checked_add(original.len() as u64)
+            .context("patch range overflows")?;
+        if end > record.size {
+            bail!(
+                "patch range {}..{} exceeds file size {}",
+                offset,
+                end,
+                record.size
+            );
+        }
+        let blob = self.read_file(record, overflow, MAX_READ_BYTES)?;
+        if compressed_descriptor(&blob)?.is_some() {
+            bail!("TIFSDaemon is compressed; in-place patching is unsafe");
+        }
+        if blob.get(offset as usize..end as usize) != Some(original) {
+            bail!("TIFSDaemon bytes do not match the pinned original bytes");
+        }
+
+        let mut logical = offset;
+        let mut patched = 0usize;
+        for extent in file_extents(record, overflow)? {
+            let extent_bytes = extent.length.saturating_mul(self.block_size);
+            let extent_end = logical.saturating_add(extent_bytes);
+            let patch_start = logical.max(offset);
+            let patch_end = extent_end.min(end);
+            if patch_start < patch_end {
+                let within = patch_start - logical;
+                let absolute = extent
+                    .begin
+                    .saturating_mul(self.block_size)
+                    .checked_add(self.origin)
+                    .and_then(|base| base.checked_add(within))
+                    .context("patch physical offset overflows")?;
+                let length = (patch_end - patch_start) as usize;
+                let image_start = absolute as usize;
+                let image_end = image_start
+                    .checked_add(length)
+                    .context("patch image range overflows")?;
+                if image_end > image.len() {
+                    bail!("patch range extends beyond the VDFS image");
+                }
+                let source_start = (patch_start - offset) as usize;
+                image[image_start..image_end]
+                    .copy_from_slice(&replacement[source_start..source_start + length]);
+                patched += length;
+            }
+            logical = extent_end;
+        }
+        if patched != replacement.len() {
+            bail!("patched {} bytes, expected {}", patched, replacement.len());
+        }
+        Ok(patched)
     }
 
     /// Summarise how far the catalog reaches and whether file forks agree with their sizes.

@@ -66,12 +66,13 @@ pub fn get_meta_iblock(
 
     let records = &snapshot.tables[sf_idx];
     if table_page_index >= records.len() {
+        let max = records.len().saturating_sub(1);
         bail!(
             "page_index {} (table_page_index {}) out of range for ino {} (max {})",
             page_index,
             table_page_index,
             ino,
-            records.len() - 1
+            max
         );
     }
 

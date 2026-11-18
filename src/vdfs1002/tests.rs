@@ -3,9 +3,10 @@ use super::format::{
     COMPRESSED_CRC_OFFSET, COMPRESSED_DESCRIPTOR_SIZE, COMPRESSED_LAYOUT, COMPRESSED_TABLE_ENTRY,
     EXTENT_KEY_SIZE, EXTENT_RECORD_SIZE, Extent, FORK_SIZE, KEY_FIXED_SIZE, MAX_READ_BYTES,
     NODE_INDEX, NODE_LEAF, Overflow, RECORD_FILE, RECORD_FOLDER, RECORD_HARDLINK,
-    RECORD_INDIRECT_LINK, RECORD_MODE_OFFSET, file_extents, kernel_crc32,
+    RECORD_INDIRECT_LINK, RECORD_MODE_OFFSET, file_extents,
 };
 use super::*;
+use crate::crc::kernel_crc32;
 use crate::hex::decode as hex;
 use anyhow::Result;
 use flate2::Compression;
@@ -302,6 +303,22 @@ fn rechecksum_base(data: &mut [u8]) {
     put_u32(data, start + 1024, crc);
 }
 
+/// Move a reference-layout image to the SDP1406 layout: superblock at 1536, extended record at 2560,
+/// blocks relative to 1024, and a stale mkfs-style superblock with invalid log fields at 1024.
+fn relocate_to_sdp1406_layout(reference: &[u8]) -> Vec<u8> {
+    let mut data = vec![0u8; reference.len() + 1024];
+    data[1024 + BLOCK..].copy_from_slice(&reference[BLOCK..]);
+    data[1536..2048].copy_from_slice(&reference[SUPERBLOCK..SUPERBLOCK + 512]);
+    data[2560..5120].copy_from_slice(&reference[EXTENDED..EXTENDED + 2560]);
+    let mut stale = reference[SUPERBLOCK..SUPERBLOCK + 512].to_vec();
+    stale[164] = 45;
+    stale[165] = 98;
+    let crc = kcrc(&stale[..508]);
+    put_u32(&mut stale, 508, crc);
+    put(&mut data, 1024, &stale);
+    data
+}
+
 fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("vdfs1002-test-{}-{name}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
@@ -309,16 +326,18 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 #[test]
-fn kernel_crc_matches_python_vectors() {
-    assert_eq!(kcrc(b"123456789"), 0x2dfd_2d88);
-    assert_eq!(kcrc(b""), 0);
-    assert_eq!(kcrc(b"hello world"), 0x66cd_a069);
+fn detects_image_by_magic() {
+    assert!(is_vdfs1002(&default_image()));
+    assert!(is_vdfs1002(&relocate_to_sdp1406_layout(&default_image())));
+    assert!(!is_vdfs1002(&[0u8; 2048]));
 }
 
 #[test]
-fn detects_image_by_magic() {
-    assert!(is_vdfs1002(&default_image()));
-    assert!(!is_vdfs1002(&[0u8; 2048]));
+fn opens_sdp1406_layout_past_stale_superblock() {
+    let data = relocate_to_sdp1406_layout(&default_image());
+    let image = Image::open(&data).unwrap();
+    assert!(image.extended_checksum_valid);
+    assert_eq!(image.catalog_records().unwrap().len(), 2);
 }
 
 #[test]

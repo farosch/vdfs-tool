@@ -1,10 +1,15 @@
-# Developing vdfs-unpack
+# Developing vdfs-tool
+
+Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
+and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
+`gzip`, and `zstd` compression. LZO compression is currently rejected until a
+native encoder is implemented.
 
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (76 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 1 manifest-mode)
-cargo build --release --locked       # ./target/release/vdfs-unpack
+cargo test --locked                  # all tests (81 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
 ```
@@ -13,13 +18,50 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 `VDFS1002_SURVEY_IMAGE=<image> cargo test --release --locked -- --ignored survey_compressed_descriptors --nocapture`.
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
+Focused decompression tests (layout 5, layout 6, digests and AES):
+`cargo test --locked --bin vdfs-tool vdfs4::decompress`.
+Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
+signature blocks, corrupt stored hashes, and changed codec/size fields that
+must fail the digest check before decompression. The unhashed size-mismatch
+test continues to exercise the output-length check independently of hashing.
+
+Layout-5 CRC regressions cover the table, optional signature block, stored
+CRC, chunk-size field and padding, plus an unhashed payload change that the
+metadata CRC must not reject. To cover both users of the shared CRC helper:
+`cargo test --locked --bin vdfs-tool -- vdfs4::decompress vdfs1002 crc::tests`.
+The CRC known-answer test lives in `src/crc.rs`; the VDFS1002 callers retain
+their existing checksum behavior.
+
+To repeat the real-image layout-5 check, build the release binary and run
+`./target/release/vdfs-tool unpack /path/to/JazzM/section-6.bin -o /path/to/new-output`.
+The sample hash, reconciled byte offsets and recorded results are in
+[README.md](README.md#layout-5-descriptor-digest). The image is not committed;
+the regression fixtures are synthesized in Rust.
+
+Focused manifest and special-node tests:
+`cargo test --locked --test manifest_mode`.
+The node regression temporarily changes the `hello.txt` catalog record in
+`small-zlib.vdfs` into each of FIFO, character-device, block-device and socket,
+with empty and nonempty binary inline forks. Both extraction modes must write
+regular files with the exact fork contents, and manifest mode must preserve
+the original catalog record. No stored fixture or production code is changed.
+Real-image validation and its limits are recorded in
+[README.md](README.md#vdfs4-special-node-validation).
+
+To inspect the same real nodes, run the release binary on the documented
+JazzM sample with `--include root/dev` and
+`--include root/usr/apps/org.tizen.services-fw/api/control`, using a fresh
+output directory. Repeat with `--manifest-dir` pointing to a fresh metadata
+directory; compare the node outputs and the corresponding `ENTRY` records.
+
 Always pass `--locked`; `Cargo.lock` is pinned. CI (`.github/workflows/test.yml`)
 runs `cargo test --locked` on pull requests into `main` and `develop` and on
 pushes to `develop`. A pull request into `main` must come from `develop`; the
-`verify-source` job fails otherwise.
+`verify-source` job always runs and reports success outside that rule or fails
+otherwise.
 
 Release (`.github/workflows/release.yml`) runs on every push to `main`. It runs
-the tests, then builds `vdfs-unpack` for `x86_64-unknown-linux-gnu`,
+the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
 `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` and `x86_64-apple-darwin`. It
 publishes a GitHub release tagged `v<version>` from the `version` field in
 `Cargo.toml`. If that tag already exists, the release is skipped, so bump the
@@ -37,14 +79,22 @@ Coding rules (module layout, error handling, tests, comments) are in
 - `src/cli.rs`: the shared `Cli` argument struct.
 - `src/lzo1x.rs`: LZO1X codec, shared by VDFS4 and VDFS1002.
 - `src/hex.rs`: shared hex helpers (`encode`; `decode` is test-only).
+- `src/crc.rs`: shared kernel-style CRC-32 for VDFS1002 structures and VDFS4
+  layout-5 compressed metadata (zero seed, no final inversion).
 - `src/vdfs4/mod.rs`: the VDFS4 pipeline (`run`). Submodules are listed below.
 - `src/vdfs4/decompress.rs`: compressed-file decoding.
   - Layout 2007 (`find_descriptor`, `decompress_blob`): the descriptor magic's
     first byte selects the digest (`DigestAlgo::from_magic`): `C` none, `I`
     MD5, `H` SHA-1, `h` SHA-256. Chunk digests are checked in extent-table
     order, then the descriptor digest (computed with bytes 24..28 zeroed).
-  - Layout 2006 (`decompress_layout5`): chunk hashes are checked; descriptor
-    hash and signature are not.
+  - Layout 2006 (`decompress_layout5`): `h` chunk hashes are checked, then the
+    descriptor-prefix hash before decompression. The stored digest follows
+    the chunk-hash table and is SHA-256 of descriptor bytes `[0, 16)`, starting
+    at the magic. Both `C` and `h` also check the kernel CRC over the table
+    through the full 32-byte descriptor, with its `[16, 20)` CRC field zeroed.
+    This includes the hashed trailer and descriptor padding, but excludes
+    chunk payloads. Signatures remain unverified. The prefix hash differs
+    from layout 6's full, CRC-zeroed descriptor hash.
   - Codecs: `Zip`, `Gzp`, and `Zst` (VDFS4 only) plus `Lzo`. `Lzo` is raw
     LZO1X in `src/lzo1x.rs`, a wrapper over the `lzo` crate. Each chunk is
     bounded by the bytes still expected for the file. Tests use liblzo2
@@ -57,7 +107,8 @@ Coding rules (module layout, error handling, tests, comments) are in
   the 16-byte `XT` table by the descriptor CRC, searching back up to
   `COMPRESSED_MAX_TABLE_GAP` (64 KiB) for padding before the descriptor.
   Written for this crate from the VDFS1002 format. `main.rs` dispatches to it
-  when the image starts with `VDFS1002` at offset 1024; the VDFS4 path is
+  when the image has a `VDFS1002` magic at a known superblock offset (1024 or
+  1536, see `LAYOUTS` in `src/vdfs1002/format.rs`); the VDFS4 path is
   taken otherwise. An image that matches neither is rejected unless `--force`
   is given, which warns on stderr and continues with VDFS4. `src/vdfs1002/cli.rs` holds its CLI handler (`run`). It restores a
   tree (`restore`): the catalog walk (inode 3),
@@ -87,6 +138,8 @@ Coding rules (module layout, error handling, tests, comments) are in
   symlink creation. Manifest mode and plain mode share this code path.
 - `tests/manifest_mode.rs`: checks that manifest mode produces the same tree as
   plain mode on `small-zlib.vdfs`, including the symlink and its `LINK` row.
+  Also covers regular-file output and raw manifest metadata preservation for
+  all four special-node types using temporary fixture mutations.
 - Other `src/vdfs4/` files: `disk` (on-disk structs), `superblock`, `btree`,
   `cattree`, `extents`, `snapshot`, `reader` (image access).
 

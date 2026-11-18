@@ -11,7 +11,8 @@ fn zero_image(name: &str) -> PathBuf {
 fn run(image: &PathBuf, extra: &[&str]) -> Output {
     let out = std::env::temp_dir().join(format!("vdfs-unpack-out-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
-    Command::new(env!("CARGO_BIN_EXE_vdfs-unpack"))
+    Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
         .arg(image)
         .arg("-o")
         .arg(&out)

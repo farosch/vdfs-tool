@@ -1,6 +1,6 @@
 # Coding conventions
 
-These rules keep `vdfs-unpack` consistent. Check them before adding code or
+These rules keep `vdfs-tool` consistent. Check them before adding code or
 reviewing a change. `DEVELOP.md` covers the commands and test fixtures.
 
 ## Project layout

@@ -5,9 +5,9 @@ use flate2::read::{GzDecoder, ZlibDecoder};
 
 use super::format::{
     COMPRESSED_CRC_OFFSET, COMPRESSED_DESCRIPTOR_SIZE, COMPRESSED_FLAG_STORED, COMPRESSED_LAYOUT,
-    COMPRESSED_MAX_TABLE_GAP, COMPRESSED_TABLE_ENTRY, MAX_READ_BYTES, kernel_crc32, le_u16, le_u32,
-    le_u64,
+    COMPRESSED_MAX_TABLE_GAP, COMPRESSED_TABLE_ENTRY, MAX_READ_BYTES, le_u16, le_u32, le_u64,
 };
+use crate::crc::kernel_crc32;
 
 pub(super) struct CompressedDescriptor {
     pub(super) start: usize,

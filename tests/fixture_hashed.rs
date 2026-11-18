@@ -34,7 +34,8 @@ fn extract(name: &str, file: &str) -> PathBuf {
     let out =
         std::env::temp_dir().join(format!("vdfs-unpack-hashed-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
-    let status = Command::new(env!("CARGO_BIN_EXE_vdfs-unpack"))
+    let status = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
         .arg(fixture_path(file))
         .arg("-o")
         .arg(&out)

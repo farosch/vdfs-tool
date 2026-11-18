@@ -8,8 +8,9 @@ mod reader;
 mod snapshot;
 mod superblock;
 mod unpacker;
+pub(crate) mod writer;
 
-use crate::cli::Cli;
+use crate::cli::UnpackArgs;
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 
@@ -23,7 +24,7 @@ pub(crate) fn is_vdfs4(image: &[u8]) -> bool {
             || layout == Some(disk::VDFS4_LAYOUT_VERSION_2007.as_slice()))
 }
 
-pub(crate) fn run(image: &[u8], args: &Cli) -> Result<()> {
+pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
     if args.audit || args.list || args.extract.is_some() || args.parent.is_some() {
         bail!("--audit, --list, --extract and --parent are only supported for VDFS1002 images");
     }

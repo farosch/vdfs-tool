@@ -195,11 +195,12 @@ pub fn decompress_file(
 
 // Layout-05 compressed descriptor (32 bytes; VDFS2006 images such as JazzM).
 // Tail layout: magic[4] ("C" or "h" plus codec), extents u16 @4, layout u16 @6 (5),
-// unpacked size u64 @8, CRC u32 @16 (not checked), log chunk u32 @20, zero pad @24.
+// unpacked size u64 @8, CRC u32 @16, log chunk u32 @20, zero pad @24.
 // Before it: one 16-byte "XT" entry per chunk, then for "h" blobs one SHA-256 per
-// chunk, one SHA-256 over the descriptor, and a signature block of 0, 128 or 256 bytes.
-// Chunk hashes are verified. The descriptor hash and signature are not: no tested
-// hash input matches the descriptor digest and the signature has no vendor key.
+// chunk, SHA-256 of descriptor bytes [0..16], and a signature block of 0, 128 or
+// 256 bytes. Offsets are relative to the magic, not a layout-6 reserved prefix.
+// CRC, log chunk size, padding and the signature are not covered by this digest.
+// The CRC covers the table through the full descriptor, with its CRC field zeroed.
 
 fn is_layout5_blob(data: &[u8]) -> bool {
     if data.len() < VDFS4_COMPR_FILE_DESC_LEN_05 {
@@ -276,6 +277,22 @@ fn decompress_layout5(data: &[u8]) -> Result<Vec<u8>> {
         })
         .context("No signature length gives verified compressed chunk hashes")?;
 
+    if hashed {
+        let digest = table + 16 * count + 32 * count;
+        if Sha256::digest(&data[descriptor..descriptor + 16]).as_slice()
+            != &data[digest..digest + 32]
+        {
+            bail!("Compressed descriptor digest mismatch");
+        }
+    }
+
+    let mut descriptor_bytes: [u8; VDFS4_COMPR_FILE_DESC_LEN_05] = data[descriptor..].try_into()?;
+    let stored_crc = u32::from_le_bytes(descriptor_bytes[16..20].try_into()?);
+    descriptor_bytes[16..20].fill(0);
+    if crate::crc::kernel_crc32(&[&data[table..descriptor], &descriptor_bytes]) != stored_crc {
+        bail!("Compressed descriptor CRC mismatch");
+    }
+
     let mut result = Vec::with_capacity(expected_size);
     for index in 0..count {
         let chunk = layout5_chunk(data, table, index)?;
@@ -304,6 +321,7 @@ fn decompress_layout5(data: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod layout5_tests {
     use super::*;
+    use crate::crc::kernel_crc32;
     use std::io::Write;
 
     fn zlib(input: &[u8]) -> Vec<u8> {
@@ -313,7 +331,14 @@ mod layout5_tests {
         writer.finish().unwrap()
     }
 
-    fn blob(hashed: bool) -> (Vec<u8>, Vec<u8>) {
+    fn update_crc(data: &mut [u8], table: usize) {
+        let descriptor = data.len() - 32;
+        data[descriptor + 16..descriptor + 20].fill(0);
+        let crc = kernel_crc32(&[&data[table..]]);
+        data[descriptor + 16..descriptor + 20].copy_from_slice(&crc.to_le_bytes());
+    }
+
+    fn blob(hashed: bool, signature_len: usize) -> (Vec<u8>, Vec<u8>) {
         let first = b"stored chunk".to_vec();
         let second = b"zlib chunk, physically after the stored one".to_vec();
         let compressed = zlib(&second);
@@ -324,17 +349,12 @@ mod layout5_tests {
             (0usize, first.len(), 1u16),
             (second_start, compressed.len(), 0u16),
         ];
+        let table = data.len();
         for &(start, len, flags) in &chunks {
             data.extend_from_slice(b"XT");
             data.extend_from_slice(&flags.to_le_bytes());
             data.extend_from_slice(&(len as u32).to_le_bytes());
             data.extend_from_slice(&(start as u64).to_le_bytes());
-        }
-        if hashed {
-            data.extend_from_slice(&Sha256::digest(&first));
-            data.extend_from_slice(&Sha256::digest(&compressed));
-            data.extend_from_slice(&[0u8; 32]);
-            data.extend_from_slice(&[0u8; 128]);
         }
         let mut descriptor = [0u8; 32];
         descriptor[0] = if hashed { b'h' } else { b'C' };
@@ -342,34 +362,112 @@ mod layout5_tests {
         descriptor[4..6].copy_from_slice(&2u16.to_le_bytes());
         descriptor[6..8].copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_05.to_le_bytes());
         descriptor[8..16].copy_from_slice(&((first.len() + second.len()) as u64).to_le_bytes());
+        descriptor[20..24].copy_from_slice(&17u32.to_le_bytes());
+        if hashed {
+            data.extend_from_slice(&Sha256::digest(&first));
+            data.extend_from_slice(&Sha256::digest(&compressed));
+            data.extend_from_slice(&Sha256::digest(&descriptor[..16]));
+            data.resize(data.len() + signature_len, 0xa5);
+        }
         data.extend_from_slice(&descriptor);
+        update_crc(&mut data, table);
         let expected = [first.as_slice(), second.as_slice()].concat();
         (data, expected)
     }
 
     #[test]
     fn decodes_hashed_layout5_with_stored_and_compressed_chunks() {
-        let (data, expected) = blob(true);
-        assert!(is_layout5_blob(&data));
-        assert_eq!(decompress_blob(&data).unwrap(), expected);
+        for signature_len in [0, 128, 256] {
+            let (data, expected) = blob(true, signature_len);
+            assert!(is_layout5_blob(&data));
+            assert_eq!(decompress_blob(&data).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn rejects_corrupt_descriptor_digest() {
+        for signature_len in [0, 128, 256] {
+            let (mut data, _) = blob(true, signature_len);
+            let digest = data.len() - 32 - signature_len - 32;
+            data[digest] ^= 1;
+            assert_eq!(
+                decompress_blob(&data).unwrap_err().to_string(),
+                "Compressed descriptor digest mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_corrupt_descriptor_prefix_before_decompression() {
+        for field in [1, 8] {
+            let (mut data, _) = blob(true, 128);
+            let descriptor = data.len() - 32;
+            if field == 1 {
+                data[descriptor + 1..descriptor + 4].copy_from_slice(b"Gzp");
+            } else {
+                data[descriptor + field] ^= 1;
+            }
+            assert_eq!(
+                decompress_blob(&data).unwrap_err().to_string(),
+                "Compressed descriptor digest mismatch"
+            );
+        }
     }
 
     #[test]
     fn decodes_unhashed_layout5() {
-        let (data, expected) = blob(false);
+        let (data, expected) = blob(false, 0);
         assert_eq!(decompress_blob(&data).unwrap(), expected);
     }
 
     #[test]
     fn rejects_corrupt_chunk_hash() {
-        let (mut data, _) = blob(true);
+        let (mut data, _) = blob(true, 128);
         data[0] ^= 1;
         assert!(decompress_blob(&data).is_err());
+    }
+
+    #[test]
+    fn rejects_crc_corruption_in_table_trailer_and_descriptor() {
+        for (hashed, signature_len) in [(false, 0), (true, 0), (true, 128), (true, 256)] {
+            let (data, _) = blob(hashed, signature_len);
+            let descriptor = data.len() - 32;
+            let trailer = if hashed { 3 * 32 + signature_len } else { 0 };
+            let table = descriptor - 2 * 16 - trailer;
+            let mut offsets = vec![
+                descriptor + 16,
+                descriptor + 20,
+                descriptor + 24,
+                descriptor + 31,
+                table + 2,
+            ];
+            if signature_len != 0 {
+                offsets.push(descriptor - 1);
+            }
+            for offset in offsets {
+                let mut corrupt = data.clone();
+                corrupt[offset] ^= 1;
+                assert_eq!(
+                    decompress_blob(&corrupt).unwrap_err().to_string(),
+                    "Compressed descriptor CRC mismatch",
+                    "hashed={hashed}, signature_len={signature_len}, offset={offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unhashed_payload_is_not_covered_by_descriptor_crc() {
+        let (mut data, mut expected) = blob(false, 0);
+        data[0] ^= 1;
+        expected[0] ^= 1;
+        assert_eq!(decompress_blob(&data).unwrap(), expected);
     }
 
     /// One unhashed compressed chunk with the given codec name in its descriptor.
     fn single_chunk_blob(name: &[u8; 3], stream: &[u8], declared_len: u64) -> Vec<u8> {
         let mut data = stream.to_vec();
+        let table = data.len();
         data.extend_from_slice(b"XT");
         data.extend_from_slice(&0u16.to_le_bytes());
         data.extend_from_slice(&(stream.len() as u32).to_le_bytes());
@@ -381,6 +479,7 @@ mod layout5_tests {
         descriptor[6..8].copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_05.to_le_bytes());
         descriptor[8..16].copy_from_slice(&declared_len.to_le_bytes());
         data.extend_from_slice(&descriptor);
+        update_crc(&mut data, table);
         data
     }
 
@@ -423,10 +522,17 @@ mod layout5_tests {
 
     #[test]
     fn rejects_declared_size_mismatch() {
-        let (mut data, _) = blob(true);
+        let (mut data, _) = blob(false, 0);
         let descriptor = data.len() - 32;
-        data[descriptor + 8] ^= 1;
-        assert!(decompress_blob(&data).is_err());
+        let size = u64::from_le_bytes(data[descriptor + 8..descriptor + 16].try_into().unwrap());
+        data[descriptor + 8..descriptor + 16].copy_from_slice(&(size + 1).to_le_bytes());
+        update_crc(&mut data, descriptor - 2 * 16);
+        assert!(
+            decompress_blob(&data)
+                .unwrap_err()
+                .to_string()
+                .starts_with("Decompressed size mismatch")
+        );
     }
 }
 
