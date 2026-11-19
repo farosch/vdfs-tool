@@ -26,8 +26,8 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 - Confirm VDFS1002 inode 5 records against an image with nonempty overflow
   extents. Synthetic tests and the earlier Python reader agree, but HawkM
-  `platform.img` has zero overflow objects. The public VDFS4 record layout
-  does not establish the VDFS1002 layout.
+  `platform.img` and the cached HawkM section-6 image have zero overflow
+  objects. The public VDFS4 record layout does not establish the VDFS1002 layout.
 - Validate the VDFS4 `extents_resolve_fork` filter `iblock >= inline_end`
   against a real overflow tree and the reference kernel. The kernel does not
   use this heuristic.
@@ -39,5 +39,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   images cover decoding, not device compatibility.
 - Establish VDFS1002 `Zhw` and `Zst` layouts and implement supported decoding
   with fixtures. VDFS4 codec support does not establish their VDFS1002 form.
-  No sampled retail VDFS4 image has yet supplied a valid `Lzo`, `Zst` or
-  `Zhw` descriptor.
+  The cached HawkM section-6 survey has no valid `Lzo`, `Zst` or `Zhw`
+  descriptors: 44,924 Gzp descriptors, 361 nested-gzip payload cases, 2,230
+  raw bodies and one unknown codec marker were observed.

@@ -1099,10 +1099,18 @@ fn classify(image: &Image<'_>, record: &CatalogRecord, overflow: &Overflow) -> V
     let gap = latest.saturating_sub(table);
     match decompress_blob(&blob, &descriptor) {
         Ok(out) => Verdict {
-            category: if out.starts_with(&[0x1f, 0x8b]) {
-                "decoded_gzip_payload"
-            } else {
-                "decoded"
+            category: match &descriptor.codec {
+                b"Zip" => "decoded_zip",
+                b"Gzp" => {
+                    if out.starts_with(&[0x1f, 0x8b]) {
+                        "decoded_gzip_payload"
+                    } else {
+                        "decoded_gzip"
+                    }
+                }
+                b"Lzo" => "decoded_lzo",
+                b"Zst" => "decoded_zst",
+                _ => "decoded_other",
             },
             gap: Some(gap),
             note: String::new(),
