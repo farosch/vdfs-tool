@@ -47,9 +47,6 @@ pub(super) fn decompress_blob(blob: &[u8], descriptor: &CompressedDescriptor) ->
     let codec = descriptor.codec;
     let count = descriptor.count as usize;
     let unpacked = descriptor.unpacked;
-    if codec == *b"Zst" {
-        bail!("compression codec Zst is not supported");
-    }
     if count == 0 || unpacked > MAX_READ_BYTES {
         bail!("compressed descriptor has no chunks or an oversized unpacked size");
     }
@@ -74,6 +71,16 @@ pub(super) fn decompress_blob(blob: &[u8], descriptor: &CompressedDescriptor) ->
         let remaining = unpacked - out.len() as u64;
         let part = if flags & COMPRESSED_FLAG_STORED != 0 {
             chunk.to_vec()
+        } else if &codec == b"Zst" {
+            let decoder = zstd::stream::read::Decoder::new(chunk)
+                .with_context(|| format!("compressed chunk {index} zstd decoder init failed"))?;
+            let mut output = Vec::new();
+            std::io::Read::read_to_end(&mut decoder.take(remaining + 1), &mut output)
+                .with_context(|| format!("compressed chunk {index} zstd decode failed"))?;
+            if output.len() as u64 > remaining {
+                bail!("decompressed output exceeds the declared size");
+            }
+            output
         } else if &codec == b"Lzo" {
             crate::lzo1x::decompress(chunk, remaining as usize)
                 .with_context(|| format!("compressed chunk {index} is truncated or corrupt"))?

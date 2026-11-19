@@ -7,7 +7,7 @@
 //! meta extent's begin block, and each meta_iblock is a block offset from the
 //! second meta extent's begin block. The overflow extent tree (inode 5) follows
 //! the VDFS4 reference and is unverified on HawkM, where that tree is empty.
-//! Lzo compressed descriptors are supported. Zstd compressed descriptors are rejected.
+//! Lzo and Zstd compressed descriptors are supported.
 
 pub(crate) mod cli;
 mod codec;

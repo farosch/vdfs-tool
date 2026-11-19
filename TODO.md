@@ -6,8 +6,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 ## Packing
 
 - Add layout-2006 packing with the 32-byte descriptor format.
-- Add overflow-extent B-tree records for files requiring more than nine inline
-  extents, hard-link records, xattrs, and complete mode/time metadata.
 - Validate large multi-chunk blobs on confirmed device layouts.
 
 ## VDFS authentication
@@ -37,7 +35,7 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 - Validate LZO on a retail image and compare the kernel's handling of bytes
   after the end-of-stream marker. Reference streams and generated VDFS4
   images cover decoding, not device compatibility.
-- Establish VDFS1002 `Zhw` and `Zst` layouts and implement supported decoding
+- Establish VDFS1002 `Zhw` layout and implement supported decoding
   with fixtures. VDFS4 codec support does not establish their VDFS1002 form.
   The cached HawkM section-6 survey has no valid `Lzo`, `Zst` or `Zhw`
   descriptors: 44,924 Gzp descriptors, 361 nested-gzip payload cases, 2,230

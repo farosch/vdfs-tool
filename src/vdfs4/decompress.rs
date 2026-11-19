@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ctr::cipher::{KeyIvInit, StreamCipher};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Read;
 
 use super::disk::*;
 use super::extents::{extents_read_data, extents_resolve_fork};
@@ -52,24 +53,36 @@ fn decompress_with(data: &[u8], ctype: ComprType, max_out: usize) -> Result<Vec<
     match ctype {
         ComprType::Zlib => {
             let mut decoder = flate2::read::ZlibDecoder::new(data);
+            let mut bounded = (&mut decoder).take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("zlib decompression failed")?;
+            if output.len() > max_out {
+                bail!("zlib decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Gzip => {
             let mut decoder = flate2::read::GzDecoder::new(data);
+            let mut bounded = (&mut decoder).take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("gzip decompression failed")?;
+            if output.len() > max_out {
+                bail!("gzip decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Zstd => {
-            let mut decoder =
+            let decoder =
                 zstd::stream::read::Decoder::new(data).context("zstd decoder init failed")?;
+            let mut bounded = decoder.take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("zstd decompression failed")?;
+            if output.len() > max_out {
+                bail!("zstd decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Lzo => crate::lzo1x::decompress(data, max_out),
@@ -754,6 +767,34 @@ mod tests {
     use super::*;
     use crate::hex::encode as hex;
     use std::io::Write;
+
+    #[test]
+    fn decompression_bounds_zlib_gzip_and_zstd_output() {
+        let payload = vec![0x5a; 4096];
+
+        let mut zlib_writer =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        zlib_writer.write_all(&payload).unwrap();
+        let zlib = zlib_writer.finish().unwrap();
+
+        let mut gzip_writer =
+            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip_writer.write_all(&payload).unwrap();
+        let gzip = gzip_writer.finish().unwrap();
+
+        let zstd = zstd::stream::encode_all(payload.as_slice(), 3).unwrap();
+        for (codec, stream) in [
+            (ComprType::Zlib, zlib),
+            (ComprType::Gzip, gzip),
+            (ComprType::Zstd, zstd),
+        ] {
+            assert!(decompress_with(&stream, codec, payload.len() - 1).is_err());
+            assert_eq!(
+                decompress_with(&stream, codec, payload.len()).unwrap(),
+                payload
+            );
+        }
+    }
 
     #[test]
     fn decrypt_chunk_matches_aes_ctr_reference() {

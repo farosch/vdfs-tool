@@ -739,13 +739,16 @@ fn rejects_lzo_chunk_longer_than_declared_size() {
 }
 
 #[test]
-fn rejects_zstd_compressed_file() {
-    let blob = with_descriptor(b"\x28\xb5\x2f\xfd", 4, b"Zst", COMPRESSED_LAYOUT);
+fn inflates_zstd_compressed_file() {
+    let payload = b"zstd zstd zstd zstd zstd zstd zstd";
+    let stream = zstd::stream::encode_all(payload.as_slice(), 3).unwrap();
+    let blob = with_descriptor(&stream, payload.len(), b"Zst", COMPRESSED_LAYOUT);
     let data = readme_image(&fork(blob.len() as u64, 1, &[(3, 1)]), vec![(3, blob)]);
     let image = Image::open(&data).unwrap();
     let record = readme(&data);
-    assert!(
-        error_text(image.file_contents(&record, &no_overflow())).contains("Zst is not supported")
+    assert_eq!(
+        image.file_contents(&record, &no_overflow()).unwrap(),
+        payload
     );
 }
 

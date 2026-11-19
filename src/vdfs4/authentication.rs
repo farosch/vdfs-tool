@@ -98,18 +98,20 @@ mod tests {
     #[test]
     fn verifies_all_supported_unprefixed_pkcs1v1_5_digests() {
         let mut rng = rand::thread_rng();
-        let private_key = rsa::RsaPrivateKey::new(&mut rng, 1024).unwrap();
-        let public_key = rsa::RsaPublicKey::from(&private_key);
-        let message = b"vdfs hash table";
-        for prefix in *b"IHh" {
-            let digest: Vec<u8> = match prefix {
-                b'I' => Md5::digest(message).to_vec(),
-                b'H' => Sha1::digest(message).to_vec(),
-                b'h' => Sha256::digest(message).to_vec(),
-                _ => unreachable!(),
-            };
-            let signature = sign_unprefixed(&private_key, &digest, 128);
-            assert!(verify_signature(&public_key, message, &signature, prefix).is_ok());
+        for (bits, width) in [(1024, 128), (2048, 256)] {
+            let private_key = rsa::RsaPrivateKey::new(&mut rng, bits).unwrap();
+            let public_key = rsa::RsaPublicKey::from(&private_key);
+            let message = b"vdfs hash table";
+            for prefix in *b"IHh" {
+                let digest: Vec<u8> = match prefix {
+                    b'I' => Md5::digest(message).to_vec(),
+                    b'H' => Sha1::digest(message).to_vec(),
+                    b'h' => Sha256::digest(message).to_vec(),
+                    _ => unreachable!(),
+                };
+                let signature = sign_unprefixed(&private_key, &digest, width);
+                assert!(verify_signature(&public_key, message, &signature, prefix).is_ok());
+            }
         }
     }
 
