@@ -8,7 +8,7 @@ use flate2::Compression;
 use flate2::write::{GzEncoder, ZlibEncoder};
 
 use super::disk::*;
-use crate::cli::PackCompression;
+use crate::cli::{PackCompression, PackLayout};
 
 const BLOCK_SIZE: u64 = 4096;
 const TABLE_BLOCK: u64 = 6;
@@ -39,7 +39,12 @@ struct CatalogMetadata {
     access_time: Vdfs4Timespec,
 }
 
-pub(crate) fn write_image(input: &Path, output: &Path, compression: PackCompression) -> Result<()> {
+pub(crate) fn write_image(
+    input: &Path,
+    output: &Path,
+    compression: PackCompression,
+    layout: PackLayout,
+) -> Result<()> {
     if !input.is_dir() {
         bail!("Input directory does not exist: {}", input.display());
     }
@@ -89,6 +94,7 @@ pub(crate) fn write_image(input: &Path, output: &Path, compression: PackCompress
                         &data,
                         entry.object_id,
                         compression,
+                        layout,
                         &mut image,
                         &mut next_block,
                         &mut overflow,
@@ -190,7 +196,7 @@ pub(crate) fn write_image(input: &Path, output: &Path, compression: PackCompress
         xattrs_meta_iblock + 1,
     )?;
     let volume_blocks = (image.len() as u64).div_ceil(BLOCK_SIZE);
-    write_superblocks(&mut image, volume_blocks, meta_pages)?;
+    write_superblocks(&mut image, volume_blocks, meta_pages, layout)?;
     fs::write(output, &image)
         .with_context(|| format!("Failed to write image: {}", output.display()))
 }
@@ -485,6 +491,7 @@ fn build_fork(
     data: &[u8],
     object_id: u64,
     compression: PackCompression,
+    layout: PackLayout,
     image: &mut Vec<u8>,
     next_block: &mut u64,
     overflow: &mut Vec<Vec<u8>>,
@@ -510,7 +517,7 @@ fn build_fork(
         }
     }
 
-    let blob = build_compressed_blob(data, compression)?;
+    let blob = build_compressed_blob(data, compression, layout)?;
     allocate_blob_fork(&blob, object_id, image, next_block, overflow)
 }
 
@@ -607,7 +614,11 @@ fn compression_magic(compression: PackCompression) -> &'static [u8; 3] {
     }
 }
 
-fn build_compressed_blob(data: &[u8], compression: PackCompression) -> Result<Vec<u8>> {
+fn build_compressed_blob(
+    data: &[u8],
+    compression: PackCompression,
+    layout: PackLayout,
+) -> Result<Vec<u8>> {
     let chunk_size = BLOCK_SIZE as usize;
     let mut payload = Vec::new();
     let mut extents = Vec::new();
@@ -625,8 +636,12 @@ fn build_compressed_blob(data: &[u8], compression: PackCompression) -> Result<Ve
     }
 
     let table_offset = payload.len();
+    let descriptor_size = match layout {
+        PackLayout::Layout2006 => 32,
+        PackLayout::Layout2007 => 40,
+    };
     let mut blob = payload;
-    blob.resize(table_offset + extents.len() * 16 + 40, 0);
+    blob.resize(table_offset + extents.len() * 16 + descriptor_size, 0);
     for (index, (start, len, flags)) in extents.iter().enumerate() {
         let at = table_offset + index * 16;
         blob[at..at + 2].copy_from_slice(b"XT");
@@ -636,13 +651,35 @@ fn build_compressed_blob(data: &[u8], compression: PackCompression) -> Result<Ve
     }
 
     let descriptor = table_offset + extents.len() * 16;
-    blob[descriptor + 8..descriptor + 9].copy_from_slice(b"C");
-    blob[descriptor + 9..descriptor + 12].copy_from_slice(compression_magic(compression));
-    blob[descriptor + 12..descriptor + 14].copy_from_slice(&(extents.len() as u16).to_le_bytes());
-    blob[descriptor + 14..descriptor + 16]
-        .copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_06.to_le_bytes());
-    blob[descriptor + 16..descriptor + 24].copy_from_slice(&(data.len() as u64).to_le_bytes());
-    blob[descriptor + 28..descriptor + 32].copy_from_slice(&12u32.to_le_bytes());
+    match layout {
+        PackLayout::Layout2006 => {
+            blob[descriptor..descriptor + 4].copy_from_slice(b"C");
+            blob[descriptor + 1..descriptor + 4].copy_from_slice(compression_magic(compression));
+            blob[descriptor + 4..descriptor + 6]
+                .copy_from_slice(&(extents.len() as u16).to_le_bytes());
+            blob[descriptor + 6..descriptor + 8]
+                .copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_05.to_le_bytes());
+            blob[descriptor + 8..descriptor + 16]
+                .copy_from_slice(&(data.len() as u64).to_le_bytes());
+            blob[descriptor + 20..descriptor + 24].copy_from_slice(&12u32.to_le_bytes());
+            let mut descriptor_bytes = blob[descriptor..descriptor + 32].to_vec();
+            descriptor_bytes[16..20].fill(0);
+            let crc =
+                crate::crc::kernel_crc32(&[&blob[table_offset..descriptor], &descriptor_bytes]);
+            blob[descriptor + 16..descriptor + 20].copy_from_slice(&crc.to_le_bytes());
+        }
+        PackLayout::Layout2007 => {
+            blob[descriptor + 8..descriptor + 9].copy_from_slice(b"C");
+            blob[descriptor + 9..descriptor + 12].copy_from_slice(compression_magic(compression));
+            blob[descriptor + 12..descriptor + 14]
+                .copy_from_slice(&(extents.len() as u16).to_le_bytes());
+            blob[descriptor + 14..descriptor + 16]
+                .copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_06.to_le_bytes());
+            blob[descriptor + 16..descriptor + 24]
+                .copy_from_slice(&(data.len() as u64).to_le_bytes());
+            blob[descriptor + 28..descriptor + 32].copy_from_slice(&12u32.to_le_bytes());
+        }
+    }
     Ok(blob)
 }
 
@@ -853,10 +890,18 @@ fn write_base_table(
     Ok(())
 }
 
-fn write_superblocks(image: &mut [u8], volume_blocks: u64, meta_pages: usize) -> Result<()> {
+fn write_superblocks(
+    image: &mut [u8],
+    volume_blocks: u64,
+    meta_pages: usize,
+    layout: PackLayout,
+) -> Result<()> {
     let mut sb = vec![0u8; 512];
     sb[0..4].copy_from_slice(b"VDFS");
-    sb[4..8].copy_from_slice(b"2007");
+    match layout {
+        PackLayout::Layout2006 => sb[4..8].copy_from_slice(b"2006"),
+        PackLayout::Layout2007 => sb[4..8].copy_from_slice(b"2007"),
+    }
     sb[8..16].copy_from_slice(&volume_blocks.to_le_bytes());
     sb[164] = 12;
     sb[165] = 12;
@@ -893,7 +938,7 @@ mod tests {
         fs::create_dir_all(root.join("sub")).unwrap();
         fs::write(root.join("sub/hello.txt"), b"hello").unwrap();
 
-        write_image(&root, &image, PackCompression::None).unwrap();
+        write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         assert_eq!(&bytes[1024..1028], b"VDFS");
         assert_eq!(&bytes[1028..1032], b"2007");
@@ -907,6 +952,38 @@ mod tests {
         }));
 
         let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_file(&image);
+    }
+
+    #[test]
+    fn writes_layout2006_round_trip() {
+        let root =
+            std::env::temp_dir().join(format!("vdfs-tool-layout2006-{}", std::process::id()));
+        let image =
+            std::env::temp_dir().join(format!("vdfs-tool-layout2006-{}.vdfs", std::process::id()));
+        let output = std::env::temp_dir().join(format!(
+            "vdfs-tool-layout2006-output-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&output);
+        let _ = fs::remove_file(&image);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("hello.txt"), b"layout 2006").unwrap();
+
+        write_image(&root, &image, PackCompression::Zlib, PackLayout::Layout2006).unwrap();
+        let bytes = fs::read(&image).unwrap();
+        assert_eq!(&bytes[1024..1028], b"VDFS");
+        assert_eq!(&bytes[1028..1032], b"2006");
+        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
+        assert_eq!(
+            fs::read(output.join("root/hello.txt")).unwrap(),
+            b"layout 2006"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&output);
         let _ = fs::remove_file(&image);
     }
 
@@ -925,7 +1002,7 @@ mod tests {
         let data = vec![0x5a; 20 * 1024];
         fs::write(root.join("large.bin"), &data).unwrap();
 
-        write_image(&root, &image, PackCompression::Zlib).unwrap();
+        write_image(&root, &image, PackCompression::Zlib, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
         super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
@@ -959,7 +1036,7 @@ mod tests {
             .collect::<Vec<_>>();
         fs::write(root.join("sub/data.bin"), &data).unwrap();
 
-        write_image(&root, &image, compression).unwrap();
+        write_image(&root, &image, compression, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
         super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
@@ -997,7 +1074,7 @@ mod tests {
             fs::write(root.join(format!("file-{index:04}.bin")), b"x").unwrap();
         }
 
-        write_image(&root, &image, PackCompression::None).unwrap();
+        write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
         assert!(reader.snapshot.tables[0].len() >= 2);
@@ -1033,12 +1110,12 @@ mod tests {
             .arg(&fifo)
             .status()
             .unwrap();
-        assert!(write_image(&root, &image, PackCompression::None).is_err());
+        assert!(write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).is_err());
         let _ = fs::remove_file(&fifo);
 
         fs::write(root.join("a.bin"), b"hardlink").unwrap();
         fs::hard_link(root.join("a.bin"), root.join("b.bin")).unwrap();
-        write_image(&root, &image, PackCompression::None).unwrap();
+        write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();
@@ -1065,7 +1142,7 @@ mod tests {
         fs::write(&file, vec![0x33; 4096 * 11 + 17]).unwrap();
         xattr::set(&file, "user.vdfs_test", b"value").unwrap();
 
-        write_image(&root, &image, PackCompression::None).unwrap();
+        write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
         let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();

@@ -5,7 +5,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 ## Packing
 
-- Add layout-2006 packing with the 32-byte descriptor format.
 - Validate large multi-chunk blobs on confirmed device layouts.
 
 ## VDFS authentication

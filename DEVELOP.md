@@ -4,6 +4,10 @@ Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
 and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
 `gzip`, `zstd`, and `lzo` compression.
 
+`pack --layout 2006` writes VDFS4 layout 2006 descriptor and superblock records.
+`pack --format vdfs1002` writes a native VDFS1002 image with catalog, index,
+leaf, and extent-backed file records.
+
 VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
 v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
 SHA-1, SHA-256, RSA1024, and RSA2048 descriptor trailers. It does not provide
@@ -12,7 +16,7 @@ vendor trust enrollment or verify superblock signatures.
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (96 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo test --locked                  # all tests (98 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -102,7 +106,7 @@ Coding rules (module layout, error handling, tests, comments) are in
   - Codecs: `Zip`, `Gzp`, and `Zst` (VDFS4 only) plus `Lzo`. `Lzo` is raw
     LZO1X in `src/lzo1x.rs`, a wrapper over the `lzo` crate. Each chunk is
     bounded by the bytes still expected for the file. Tests use liblzo2
-    reference streams. Zst is still rejected for VDFS1002.
+    reference streams. Zst is implemented for VDFS1002 descriptor-backed bodies.
 - `src/vdfs1002/`: VDFS1002 reader (HawkM `platform.img`, `data_backup.img`).
   `mod.rs` re-exports the pieces: `format.rs` (on-disk structs and constants),
   `image.rs` (`Image`, catalog and fork access), `codec.rs` (descriptors and
@@ -131,7 +135,7 @@ Coding rules (module layout, error handling, tests, comments) are in
   warns.
   - Layout facts are documented in the module comments and tests. The
     overflow-extent record layout (inode 5) is not yet verified against a real
-    image (see TODO.md). Lzo and Zlib/Gzip are decoded; Zst is rejected.
+    image (see TODO.md). Lzo, Zlib/Gzip and Zstd are decoded.
   - Tests are synthetic: `build_image` in the `tests` module writes a complete
     image in memory, and the tests cover bad magic and checksums, loops,
     truncation, overflow, zlib/gzip/plain bodies, audit, selection, and tree

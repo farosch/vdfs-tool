@@ -16,6 +16,7 @@ mod image;
 mod restore;
 #[cfg(test)]
 mod tests;
+pub(crate) mod writer;
 
 pub use format::CatalogRecord;
 pub use image::Image;

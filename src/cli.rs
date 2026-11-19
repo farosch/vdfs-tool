@@ -86,6 +86,14 @@ pub(crate) struct PackArgs {
     /// Compression codec.
     #[arg(long, value_enum, default_value = "none")]
     pub(crate) compression: PackCompression,
+
+    /// Filesystem format to create.
+    #[arg(long, value_enum, default_value = "vdfs4")]
+    pub(crate) format: PackFormat,
+
+    /// VDFS4 layout version.
+    #[arg(long, value_enum, default_value = "2007")]
+    pub(crate) layout: PackLayout,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,4 +103,18 @@ pub(crate) enum PackCompression {
     Gzip,
     Lzo,
     Zstd,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PackFormat {
+    Vdfs4,
+    Vdfs1002,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PackLayout {
+    #[value(name = "2006")]
+    Layout2006,
+    #[value(name = "2007")]
+    Layout2007,
 }

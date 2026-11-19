@@ -53,6 +53,13 @@ Pack a host directory into a VDFS4 layout-2007 image:
 vdfs-tool pack <directory> -o <image.img>
 ```
 
+Select VDFS4 layout 2006 or VDFS1002:
+
+```sh
+vdfs-tool pack <directory> -o <image.img> --layout 2006
+vdfs-tool pack <directory> -o <image.img> --format vdfs1002
+```
+
 Select compression with:
 
 ```sh
@@ -71,9 +78,9 @@ Supported packing codecs:
 
 | Format | Unpack | Pack |
 |---|---|---|
-| VDFS4 layout 2006 | Yes | No |
+| VDFS4 layout 2006 | Yes | Yes |
 | VDFS4 layout 2007 | Yes | Yes |
-| VDFS1002 | Yes | No |
+| VDFS1002 | Yes | Yes |
 
 The packer currently supports regular files, directories, symbolic links,
 inline forks, and extent-backed files.
