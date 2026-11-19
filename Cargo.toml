@@ -1,6 +1,6 @@
 [package]
 name = "vdfs-tool"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 description = "Samsung VDFS4 and VDFS1002 filesystem image packer and unpacker"
 license = "Apache-2.0"
