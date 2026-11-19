@@ -11,6 +11,8 @@ pub struct ImageReader<'a> {
     pub snapshot: SnapshotInfo,
     /// 16-byte AES-128 key for encrypted chunks; `None` if no key was supplied.
     pub aes_key: Option<[u8; 16]>,
+    /// Optional RSA public key used to verify hashed VDFS4 descriptor signatures.
+    pub rsa_public_key: Option<rsa::RsaPublicKey>,
 }
 
 impl<'a> ImageReader<'a> {
@@ -22,6 +24,7 @@ impl<'a> ImageReader<'a> {
             sbi,
             snapshot,
             aes_key: None,
+            rsa_public_key: None,
         })
     }
 

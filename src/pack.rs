@@ -16,13 +16,20 @@ pub(crate) fn run(args: PackArgs) -> Result<()> {
         args.input.with_file_name(format!("{name}.vdfs"))
     });
 
-    crate::vdfs4::writer::write_image(&args.input, &output, args.compression)
+    match args.format {
+        crate::cli::PackFormat::Vdfs4 => {
+            crate::vdfs4::writer::write_image(&args.input, &output, args.compression, args.layout)
+        }
+        crate::cli::PackFormat::Vdfs1002 => {
+            crate::vdfs1002::writer::write_image(&args.input, &output, args.compression)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::PackCompression;
+    use crate::cli::{PackCompression, PackFormat, PackLayout};
     use std::fs;
 
     #[test]
@@ -34,6 +41,8 @@ mod tests {
             input: path.clone(),
             output: None,
             compression: PackCompression::None,
+            format: PackFormat::Vdfs4,
+            layout: PackLayout::Layout2007,
         });
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
@@ -52,6 +61,8 @@ mod tests {
             input: path.clone(),
             output: Some(output.clone()),
             compression: PackCompression::Zlib,
+            format: PackFormat::Vdfs4,
+            layout: PackLayout::Layout2007,
         });
         assert!(result.is_ok());
         assert!(output.exists());

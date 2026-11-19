@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use ctr::cipher::{KeyIvInit, StreamCipher};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Read;
 
 use super::disk::*;
 use super::extents::{extents_read_data, extents_resolve_fork};
@@ -52,24 +53,36 @@ fn decompress_with(data: &[u8], ctype: ComprType, max_out: usize) -> Result<Vec<
     match ctype {
         ComprType::Zlib => {
             let mut decoder = flate2::read::ZlibDecoder::new(data);
+            let mut bounded = (&mut decoder).take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("zlib decompression failed")?;
+            if output.len() > max_out {
+                bail!("zlib decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Gzip => {
             let mut decoder = flate2::read::GzDecoder::new(data);
+            let mut bounded = (&mut decoder).take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("gzip decompression failed")?;
+            if output.len() > max_out {
+                bail!("gzip decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Zstd => {
-            let mut decoder =
+            let decoder =
                 zstd::stream::read::Decoder::new(data).context("zstd decoder init failed")?;
+            let mut bounded = decoder.take(max_out as u64 + 1);
             let mut output = Vec::new();
-            std::io::Read::read_to_end(&mut decoder, &mut output)
+            std::io::Read::read_to_end(&mut bounded, &mut output)
                 .context("zstd decompression failed")?;
+            if output.len() > max_out {
+                bail!("zstd decompression exceeds declared size");
+            }
             Ok(output)
         }
         ComprType::Lzo => crate::lzo1x::decompress(data, max_out),
@@ -190,7 +203,11 @@ pub fn decompress_file(
     }
     let data = extents_read_data(reader, &extents, 0, comp_total)?;
 
-    decompress_blob_keyed(&data, reader.aes_key.as_ref())
+    decompress_blob_keyed(
+        &data,
+        reader.aes_key.as_ref(),
+        reader.rsa_public_key.as_ref(),
+    )
 }
 
 // Layout-05 compressed descriptor (32 bytes; VDFS2006 images such as JazzM).
@@ -237,7 +254,7 @@ fn layout5_chunk(data: &[u8], table: usize, index: usize) -> Result<Layout5Chunk
     Ok(Layout5Chunk { flags, start, len })
 }
 
-fn decompress_layout5(data: &[u8]) -> Result<Vec<u8>> {
+fn decompress_layout5(data: &[u8], rsa_public_key: Option<&rsa::RsaPublicKey>) -> Result<Vec<u8>> {
     let descriptor = data.len() - VDFS4_COMPR_FILE_DESC_LEN_05;
     let magic = &data[descriptor..descriptor + 4];
     let ctype = detect_compr_type(magic).context("unknown compression type in descriptor")?;
@@ -251,14 +268,16 @@ fn decompress_layout5(data: &[u8]) -> Result<Vec<u8>> {
     if expected_size > 512 * 1024 * 1024 {
         bail!("Decompressed file exceeds local 512 MiB limit");
     }
-    let hashed = magic[0] == b'h';
+    let algo = DigestAlgo::from_magic(magic[0])?;
+    let hashed = algo.is_some();
+    let digest_len = algo.map_or(0, DigestAlgo::len);
     let signatures: &[usize] = if hashed { &[0, 128, 256] } else { &[0] };
     let table = signatures
         .iter()
         .find_map(|&signature| {
             let overhead = 16 * count
                 + if hashed {
-                    32 * (count + 1) + signature
+                    digest_len * (count + 1) + signature
                 } else {
                     0
                 };
@@ -270,19 +289,36 @@ fn decompress_layout5(data: &[u8]) -> Result<Vec<u8>> {
                 if !hashed {
                     return true;
                 }
-                let digest = &data[table + 16 * count + 32 * index..][..32];
-                Sha256::digest(&data[chunk.start..chunk.start + chunk.len]).as_slice() == digest
+                let digest = &data[table + 16 * count + digest_len * index..][..digest_len];
+                algo.map(|algo| {
+                    algo.digest(&data[chunk.start..chunk.start + chunk.len])
+                        .as_slice()
+                        == digest
+                })
+                .unwrap_or(false)
             });
             verified.then_some(table)
         })
         .context("No signature length gives verified compressed chunk hashes")?;
 
-    if hashed {
-        let digest = table + 16 * count + 32 * count;
-        if Sha256::digest(&data[descriptor..descriptor + 16]).as_slice()
-            != &data[digest..digest + 32]
+    if let Some(algo) = algo {
+        let digest = table + 16 * count + digest_len * count;
+        if algo.digest(&data[descriptor..descriptor + 16]).as_slice()
+            != &data[digest..digest + digest_len]
         {
             bail!("Compressed descriptor digest mismatch");
+        }
+        let signature_offset = digest + digest_len;
+        let signature_len = match descriptor.checked_sub(signature_offset) {
+            Some(available) if available == 0 || available == 128 || available == 256 => available,
+            _ => 0,
+        };
+        if let Some(public_key) = rsa_public_key
+            && signature_len > 0
+        {
+            let signed = &data[table + 16 * count..table + 16 * count + digest_len * (count + 1)];
+            let signature = &data[signature_offset..signature_offset + signature_len];
+            super::authentication::verify_signature(public_key, signed, signature, magic[0])?;
         }
     }
 
@@ -564,12 +600,16 @@ fn decrypt_chunk(
 
 #[cfg(test)]
 fn decompress_blob(data: &[u8]) -> Result<Vec<u8>> {
-    decompress_blob_keyed(data, None)
+    decompress_blob_keyed(data, None, None)
 }
 
-fn decompress_blob_keyed(data: &[u8], key: Option<&AesKey>) -> Result<Vec<u8>> {
+fn decompress_blob_keyed(
+    data: &[u8],
+    key: Option<&AesKey>,
+    rsa_public_key: Option<&rsa::RsaPublicKey>,
+) -> Result<Vec<u8>> {
     if is_layout5_blob(data) {
-        return decompress_layout5(data);
+        return decompress_layout5(data, rsa_public_key);
     }
     let descr_offset =
         find_descriptor(data).context("Could not locate compressed file descriptor")?;
@@ -616,6 +656,31 @@ fn decompress_blob_keyed(data: &[u8], key: Option<&AesKey>) -> Result<Vec<u8>> {
         let start = hash_offset + digest_len * comp_extents_count;
         if hash.as_slice() != &data[start..start + digest_len] {
             bail!("Compressed descriptor digest mismatch");
+        }
+        if let Some(public_key) = rsa_public_key
+            && matches!(descr.sign_type, 1 | 2)
+        {
+            let signed_len = digest_len * (comp_extents_count + 1);
+            let signature_len = match descr.sign_type {
+                1 => 128,
+                2 => 256,
+                _ => bail!("Unknown hashed-file signature type"),
+            };
+            let signed_end = hash_offset
+                .checked_add(signed_len)
+                .context("RSA signed hash range overflow")?;
+            let signature_end = signed_end
+                .checked_add(signature_len)
+                .context("RSA signature range overflow")?;
+            if signature_end > descr_offset {
+                bail!("RSA signature exceeds compressed descriptor");
+            }
+            super::authentication::verify_signature(
+                public_key,
+                &data[hash_offset..signed_end],
+                &data[signed_end..signature_end],
+                descr.magic[0],
+            )?;
         }
     }
     let expected_size = usize::try_from(descr.unpacked_size)?;
@@ -702,6 +767,34 @@ mod tests {
     use super::*;
     use crate::hex::encode as hex;
     use std::io::Write;
+
+    #[test]
+    fn decompression_bounds_zlib_gzip_and_zstd_output() {
+        let payload = vec![0x5a; 4096];
+
+        let mut zlib_writer =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        zlib_writer.write_all(&payload).unwrap();
+        let zlib = zlib_writer.finish().unwrap();
+
+        let mut gzip_writer =
+            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gzip_writer.write_all(&payload).unwrap();
+        let gzip = gzip_writer.finish().unwrap();
+
+        let zstd = zstd::stream::encode_all(payload.as_slice(), 3).unwrap();
+        for (codec, stream) in [
+            (ComprType::Zlib, zlib),
+            (ComprType::Gzip, gzip),
+            (ComprType::Zstd, zstd),
+        ] {
+            assert!(decompress_with(&stream, codec, payload.len() - 1).is_err());
+            assert_eq!(
+                decompress_with(&stream, codec, payload.len()).unwrap(),
+                payload
+            );
+        }
+    }
 
     #[test]
     fn decrypt_chunk_matches_aes_ctr_reference() {
