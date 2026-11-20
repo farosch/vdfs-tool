@@ -26,6 +26,10 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 `VDFS1002_SURVEY_IMAGE=<image> cargo test --release --locked -- --ignored survey_compressed_descriptors --nocapture`.
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
+`unpack --patch-tif` synthesizes one zlib CZip chunk for `TIFSDaemon` and pins
+the resulting descriptor to layout 5. Its regression test is:
+`cargo test --locked --bin vdfs-tool synthetic_tif_czip_uses_layout5`.
+
 Focused decompression tests (layout 5, layout 6, digests and AES):
 `cargo test --locked --bin vdfs-tool vdfs4::decompress`.
 Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte

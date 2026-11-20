@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 
+const CZIP_LAYOUT: u16 = 5;
+
 pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     let modes = [args.audit, args.list, args.extract.is_some()]
         .iter()
@@ -81,7 +83,7 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         let descriptor = table + 16;
         blob[descriptor..descriptor + 4].copy_from_slice(b"CZip");
         blob[descriptor + 4..descriptor + 6].copy_from_slice(&1u16.to_le_bytes());
-        blob[descriptor + 6..descriptor + 8].copy_from_slice(&4u16.to_le_bytes());
+        blob[descriptor + 6..descriptor + 8].copy_from_slice(&CZIP_LAYOUT.to_le_bytes());
         blob[descriptor + 8..descriptor + 16]
             .copy_from_slice(&(logical.len() as u64).to_le_bytes());
         blob[descriptor + 16..descriptor + 20].fill(0);
@@ -201,4 +203,14 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     }
     println!("Done!");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CZIP_LAYOUT;
+
+    #[test]
+    fn synthetic_tif_czip_uses_layout5() {
+        assert_eq!(CZIP_LAYOUT, 5);
+    }
 }
