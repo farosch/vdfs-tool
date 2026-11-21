@@ -227,6 +227,9 @@ Pull requests targeting `develop` run formatting, tests, and Clippy. A push to
 the next patch version after the highest existing `vMAJOR.MINOR.PATCH` tag,
 without requiring a manual `Cargo.toml` version bump.
 
+Pull requests also build the `x86_64-pc-windows-msvc` target to prevent
+Unix-only dependencies or APIs from reaching the release pipeline.
+
 ## License
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).
