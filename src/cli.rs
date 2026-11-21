@@ -18,6 +18,48 @@ pub(crate) enum Command {
     Unpack(UnpackArgs),
     /// Create a Samsung VDFS4 filesystem image.
     Pack(PackArgs),
+    /// Manage local vendor public-key trust anchors.
+    Trust(TrustArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct TrustArgs {
+    #[command(subcommand)]
+    pub(crate) command: TrustCommand,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub(crate) enum TrustCommand {
+    /// Enroll a PEM RSA public key as a local trust anchor.
+    Enroll(EnrollTrustArgs),
+    /// List enrolled trust anchors.
+    List(ListTrustArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct EnrollTrustArgs {
+    /// Human-readable vendor or key label.
+    #[arg(long)]
+    pub(crate) label: String,
+
+    /// PEM RSA public key to enroll.
+    #[arg(long)]
+    pub(crate) public_key: PathBuf,
+
+    /// Override the local trust store directory.
+    #[arg(long)]
+    pub(crate) store: Option<PathBuf>,
+
+    /// Replace an existing label.
+    #[arg(long)]
+    pub(crate) replace: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct ListTrustArgs {
+    /// Override the local trust store directory.
+    #[arg(long)]
+    pub(crate) store: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -43,7 +85,15 @@ pub(crate) struct UnpackArgs {
 
     /// PEM RSA public key used to verify hashed VDFS4 descriptor signatures.
     #[arg(long = "public-key")]
-    pub(crate) public_key: Option<PathBuf>,
+    pub(crate) public_key: Vec<PathBuf>,
+
+    /// PEM RSA public key trust anchor (repeatable).
+    #[arg(long = "trust-key")]
+    pub(crate) trust_key: Vec<PathBuf>,
+
+    /// Trust store directory (repeatable).
+    #[arg(long = "trust-dir")]
+    pub(crate) trust_dir: Vec<PathBuf>,
 
     /// Try VDFS4 extraction on an image that is not a recognized VDFS1002 or VDFS4 image.
     #[arg(long)]

@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -36,21 +36,27 @@ jobs:
       new: ${{ steps.version.outputs.new }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Read version and check for an existing release
+      - name: Calculate next release version
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [ -n "$latest" ]; then
+            current=${latest#v}
+            major=$(echo "$current" | cut -d. -f1)
+            minor=$(echo "$current" | cut -d. -f2)
+            patch=$(echo "$current" | cut -d. -f3)
+            version="$major.$minor.$((patch + 1))"
+          else
+            version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          fi
           tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::Release $tag already exists; bump the version in Cargo.toml to publish a new release."
-            echo "new=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "new=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "new=true" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [test, version]
@@ -71,6 +77,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -78,6 +88,39 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+
+      - name: Set release version
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.tag }}
+        run: |
+          version=${VERSION#v}
+          python <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"][1:]
+          manifest = pathlib.Path("Cargo.toml")
+          text = manifest.read_text()
+          text = re.sub(
+              r'(?m)^version = "[^"]+"',
+              f'version = "{version}"',
+              text,
+              count=1,
+          )
+          manifest.write_text(text)
+
+          lock = pathlib.Path("Cargo.lock")
+          text = lock.read_text()
+          text = re.sub(
+              r'(name = "vdfs-tool"\nversion = ")[^"]+(")',
+              lambda match: f'{match.group(1)}{version}{match.group(2)}',
+              text,
+              count=1,
+          )
+          lock.write_text(text)
+          PY
 
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}

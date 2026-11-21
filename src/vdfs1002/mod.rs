@@ -20,7 +20,9 @@ pub(crate) mod writer;
 
 pub use format::CatalogRecord;
 pub use image::Image;
-pub use restore::{restore, select_file};
+#[cfg(test)]
+pub use restore::restore;
+pub use restore::{restore_selected, select_file, validate_selection};
 
 use format::LAYOUTS;
 

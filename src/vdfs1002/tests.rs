@@ -838,6 +838,35 @@ fn restore_writes_tree_and_refuses_existing_destination() {
 }
 
 #[test]
+fn restore_selected_keeps_selected_subtree_and_ancestors() {
+    let catalog = vec![
+        root_record(),
+        leaf_record(1, 10, RECORD_FOLDER, b"usr", &[]),
+        leaf_record(1, 9, RECORD_FILE, b"README.md", &fork(4, 1, &[(4, 1)])),
+        leaf_record(10, 11, RECORD_FILE, b"selected.txt", &fork(8, 1, &[(4, 1)])),
+    ];
+    let mut data = build_image(&catalog, &[]);
+    put(&mut data, 4 * BLOCK, b"selected");
+    let destination = scratch("restore-selected");
+    let summary = restore_selected(&data, &destination, &["root/usr".to_string()]).unwrap();
+
+    assert!(summary.failures.is_empty());
+    assert!(
+        destination
+            .join("root")
+            .join("usr")
+            .join("selected.txt")
+            .is_file()
+    );
+    assert_eq!(
+        fs::read(destination.join("root").join("usr").join("selected.txt")).unwrap(),
+        b"selected"
+    );
+    assert!(!destination.join("root").join("README.md").exists());
+    fs::remove_dir_all(&destination).unwrap();
+}
+
+#[test]
 fn parses_mode_and_leaves_it_absent_when_record_is_too_short() {
     let catalog = vec![
         root_record(),

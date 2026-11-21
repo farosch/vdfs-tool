@@ -2,9 +2,7 @@ name: Test
 
 on:
   pull_request:
-    branches: [main, develop]
-  push:
-    branches: [develop]
+    branches: [develop, main]
 
 permissions:
   contents: read
@@ -13,13 +11,16 @@ jobs:
   verify-source:
     runs-on: ubuntu-latest
     steps:
-      - name: Require develop as the source branch
+      - name: Validate branch policy
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.base_ref }}" != "main" ]; then
-            echo "::notice::Source branch check applies only to pull requests into main."
-            exit 0
+          if [ "${{ github.base_ref }}" = "develop" ] && {
+            [ "${{ github.head_ref }}" = "develop" ] ||
+            [ "${{ github.head_ref }}" = "main" ];
+          }; then
+            echo "::error::Changes must come from a feature branch, not main or develop."
+            exit 1
           fi
-          if [ "${{ github.head_ref }}" != "develop" ]; then
+          if [ "${{ github.base_ref }}" = "main" ] && [ "${{ github.head_ref }}" != "develop" ]; then
             echo "::error::Pull requests into main must come from develop (got '${{ github.head_ref }}')."
             exit 1
           fi
@@ -41,3 +42,25 @@ jobs:
         run: |
           cargo test --locked
           python -m unittest discover -s .github/tests -p 'test_*.py'
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run lints
+        run: cargo clippy --locked --all-targets
+
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Build Windows binary
+        run: cargo build --locked --target x86_64-pc-windows-msvc

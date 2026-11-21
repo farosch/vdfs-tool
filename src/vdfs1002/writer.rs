@@ -37,7 +37,7 @@ pub(crate) fn write_image(input: &Path, output: &Path, compression: PackCompress
     let mut next_block = DATA_START;
     let mut image = vec![0u8; (DATA_START as usize + 64) * BLOCK as usize];
     let mut catalog = Vec::new();
-    let mut hardlinks = std::collections::HashMap::new();
+    let mut hardlinks: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
 
     catalog.push(folder_record(0, 1, b"root", 0o040755));
     for entry in &entries {
