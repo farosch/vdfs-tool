@@ -34,10 +34,20 @@ pub struct RestoreSummary {
 ///
 /// An indirect record (type 5) is an upward back-reference, so it creates nothing.
 /// Hard-link names are copies of the body, not filesystem hard links.
+#[cfg(test)]
 pub fn restore_tree(
     image: &Image<'_>,
     records: &[CatalogRecord],
     destination: &Path,
+) -> Result<RestoreSummary> {
+    restore_tree_selected(image, records, destination, &[])
+}
+
+pub fn restore_tree_selected(
+    image: &Image<'_>,
+    records: &[CatalogRecord],
+    destination: &Path,
+    includes: &[String],
 ) -> Result<RestoreSummary> {
     if destination.exists() {
         bail!(
@@ -56,6 +66,10 @@ pub fn restore_tree(
         match relative_parts(&folders, folder.parent_id) {
             Some(parts) if all_safe(&parts) && safe(&folder.name) => {
                 let path = join(destination, &parts, &folder.name);
+                let relative = relative_name(&parts, &folder.name);
+                if !selected_path(&relative, includes) {
+                    continue;
+                }
                 fs::create_dir_all(&path)?;
                 if let Some(mode) = folder.mode {
                     folder_modes.push((path, folder.object_id, mode));
@@ -97,6 +111,10 @@ pub fn restore_tree(
                 continue;
             }
         };
+        let relative = relative_name(&parts, &record.name);
+        if !selected_path(&relative, includes) {
+            continue;
+        }
         let contents = match image.file_contents(body, &overflow) {
             Ok(contents) => contents,
             Err(error) => {
@@ -144,10 +162,23 @@ pub fn restore_tree(
 }
 
 /// Open `image`, decode its catalog and restore the tree under `destination`.
+#[cfg(test)]
 pub fn restore(image: &[u8], destination: &Path) -> Result<RestoreSummary> {
     let opened = Image::open(image)?;
     let records = opened.catalog_records()?;
     let mut summary = restore_tree(&opened, &records, destination)?;
+    summary.extended_checksum_valid = opened.extended_checksum_valid;
+    Ok(summary)
+}
+
+pub fn restore_selected(
+    image: &[u8],
+    destination: &Path,
+    includes: &[String],
+) -> Result<RestoreSummary> {
+    let opened = Image::open(image)?;
+    let records = opened.catalog_records()?;
+    let mut summary = restore_tree_selected(&opened, &records, destination, includes)?;
     summary.extended_checksum_valid = opened.extended_checksum_valid;
     Ok(summary)
 }
@@ -219,6 +250,42 @@ fn is_back_reference(
 /// names read it through the object id, so it has no path of its own.
 fn is_nameless_body(record: &CatalogRecord) -> bool {
     record.name.is_empty() && record.parent_id == record.object_id
+}
+
+pub fn validate_selection(includes: &[String]) -> Result<()> {
+    if includes.len() > 1024 {
+        bail!("Too many selected paths");
+    }
+    for path in includes {
+        if path.len() > 4096
+            || path.contains('\\')
+            || path.chars().any(char::is_control)
+            || path
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            bail!("Unsafe selected path");
+        }
+    }
+    Ok(())
+}
+
+fn selected_path(path: &str, includes: &[String]) -> bool {
+    includes.is_empty()
+        || includes.iter().any(|allowed| {
+            path == allowed
+                || allowed.starts_with(&format!("{path}/"))
+                || path.starts_with(&format!("{allowed}/"))
+        })
+}
+
+fn relative_name(parts: &[Vec<u8>], name: &[u8]) -> String {
+    let mut components: Vec<String> = parts
+        .iter()
+        .map(|part| String::from_utf8_lossy(part).into_owned())
+        .collect();
+    components.push(String::from_utf8_lossy(name).into_owned());
+    components.join("/")
 }
 
 fn safe(name: &[u8]) -> bool {

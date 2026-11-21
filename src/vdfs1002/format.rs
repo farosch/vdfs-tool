@@ -53,6 +53,7 @@ pub(super) const FORK_EXTENT_COUNT: usize = 13;
 pub(super) const MAX_READ_BYTES: u64 = 256 << 20;
 pub(super) const COMPRESSED_DESCRIPTOR_SIZE: usize = 32;
 pub(super) const COMPRESSED_LAYOUT: u16 = 4;
+pub(super) const COMPRESSED_LAYOUT_5: u16 = 5;
 pub(super) const COMPRESSED_TABLE_ENTRY: usize = 16;
 pub(super) const COMPRESSED_CRC_OFFSET: usize = 16;
 pub(super) const COMPRESSED_FLAG_STORED: u16 = 1;

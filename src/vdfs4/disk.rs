@@ -256,7 +256,8 @@ pub fn sf_index(ino: u64) -> usize {
 
 pub unsafe fn read_packed<T: Copy>(data: &[u8], offset: usize) -> Option<T> {
     let size = std::mem::size_of::<T>();
-    if offset + size > data.len() {
+    let end = offset.checked_add(size)?;
+    if end > data.len() {
         return None;
     }
     Some(unsafe { std::ptr::read_unaligned(data[offset..].as_ptr() as *const T) })

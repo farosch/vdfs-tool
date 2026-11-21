@@ -94,6 +94,50 @@ fn extracted_directories_are_exactly_the_expected_set() {
     fs::remove_dir_all(&out).unwrap();
 }
 
+#[test]
+fn vdfs4_read_modes_match_vdfs1002_workflows() {
+    let listed = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
+        .arg(FIXTURE)
+        .arg("--list")
+        .arg("--json")
+        .output()
+        .expect("failed to list VDFS4 catalog");
+    assert!(listed.status.success());
+    let listing: serde_json::Value =
+        serde_json::from_slice(&listed.stdout).expect("invalid VDFS4 JSON listing");
+    assert!(listing["record_count"].as_u64().unwrap_or(0) > 0);
+
+    let audited = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
+        .arg(FIXTURE)
+        .arg("--audit")
+        .output()
+        .expect("failed to audit VDFS4 catalog");
+    assert!(audited.status.success());
+    let audit: serde_json::Value =
+        serde_json::from_slice(&audited.stdout).expect("invalid VDFS4 JSON audit");
+    assert_eq!(audit["files"].as_u64(), Some(4));
+
+    let output = std::env::temp_dir().join(format!("vdfs-unpack-extract-{}", std::process::id()));
+    let _ = fs::remove_file(&output);
+    let extracted = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+        .arg("unpack")
+        .arg(FIXTURE)
+        .arg("--extract")
+        .arg("hello.txt")
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .expect("failed to extract VDFS4 file");
+    assert!(extracted.status.success());
+    assert_eq!(fs::read(&output).unwrap(), b"hello from the vdfs fixture\n");
+    let report: serde_json::Value =
+        serde_json::from_slice(&extracted.stdout).expect("invalid VDFS4 extraction report");
+    assert_eq!(report["size"].as_u64(), Some(28));
+    fs::remove_file(&output).unwrap();
+}
+
 fn collect_files(base: &Path, dir: &Path, acc: &mut Vec<String>) {
     for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
