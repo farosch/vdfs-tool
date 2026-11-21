@@ -17,8 +17,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
       - name: Run tests
-        run: cargo test --locked
+        run: |
+          cargo test --locked
+          python -m unittest discover -s .github/tests -p 'test_*.py'
 
   version:
     needs: test
@@ -77,6 +83,7 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package
+        id: package
         shell: bash
         env:
           TAG: ${{ needs.version.outputs.tag }}
@@ -89,16 +96,16 @@ jobs:
           cp "target/${TARGET}/release/${bin}" README.md LICENSE "$name/"
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a "${name}.zip" "$name" >/dev/null
-            echo "ARCHIVE=${name}.zip" >> "$GITHUB_ENV"
+            echo "archive=${name}.zip" >> "$GITHUB_OUTPUT"
           else
             tar -czf "${name}.tar.gz" "$name"
-            echo "ARCHIVE=${name}.tar.gz" >> "$GITHUB_ENV"
+            echo "archive=${name}.tar.gz" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: ${{ env.ARCHIVE }}
+          path: ${{ steps.package.outputs.archive }}
           if-no-files-found: error
 
   publish:

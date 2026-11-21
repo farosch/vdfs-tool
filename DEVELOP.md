@@ -89,6 +89,9 @@ the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
 publishes a GitHub release tagged `v<version>` from the `version` field in
 `Cargo.toml`. If that tag already exists, the release is skipped, so bump the
 version before merging a release.
+Package names are set as the `package` step's `archive` output and consumed by
+the upload-artifact step. Verify release workflow regressions with
+`python -m unittest discover -s .github/tests -p 'test_*.py'`.
 
 
 Coding rules (module layout, error handling, tests, comments) are in
