@@ -813,14 +813,14 @@ fn rejects_corrupted_chunk_table_before_inflating() {
 }
 
 #[test]
-fn rejects_unsupported_descriptor_layout() {
+fn accepts_layout5_descriptor() {
     let blob = with_descriptor(&gzip(b"abc"), 3, b"Gzp", 5);
     let data = readme_image(&fork(blob.len() as u64, 1, &[(3, 1)]), vec![(3, blob)]);
     let image = Image::open(&data).unwrap();
     let record = readme(&data);
-    assert!(
-        error_text(image.file_contents(&record, &no_overflow()))
-            .contains("unsupported compressed descriptor layout 5")
+    assert_eq!(
+        image.file_contents(&record, &no_overflow()).unwrap(),
+        b"abc"
     );
 }
 
@@ -834,6 +834,35 @@ fn restore_writes_tree_and_refuses_existing_destination() {
     assert!(summary.failures.is_empty());
     assert!(destination.join("root").join("README.md").is_file());
     assert!(restore(&data, &destination).is_err());
+    fs::remove_dir_all(&destination).unwrap();
+}
+
+#[test]
+fn restore_selected_keeps_selected_subtree_and_ancestors() {
+    let catalog = vec![
+        root_record(),
+        leaf_record(1, 10, RECORD_FOLDER, b"usr", &[]),
+        leaf_record(1, 9, RECORD_FILE, b"README.md", &fork(4, 1, &[(4, 1)])),
+        leaf_record(10, 11, RECORD_FILE, b"selected.txt", &fork(8, 1, &[(4, 1)])),
+    ];
+    let mut data = build_image(&catalog, &[]);
+    put(&mut data, 4 * BLOCK, b"selected");
+    let destination = scratch("restore-selected");
+    let summary = restore_selected(&data, &destination, &["root/usr".to_string()]).unwrap();
+
+    assert!(summary.failures.is_empty());
+    assert!(
+        destination
+            .join("root")
+            .join("usr")
+            .join("selected.txt")
+            .is_file()
+    );
+    assert_eq!(
+        fs::read(destination.join("root").join("usr").join("selected.txt")).unwrap(),
+        b"selected"
+    );
+    assert!(!destination.join("root").join("README.md").exists());
     fs::remove_dir_all(&destination).unwrap();
 }
 
@@ -1023,6 +1052,7 @@ const HARD_CATEGORIES: [&str; 5] = [
 struct Verdict {
     category: &'static str,
     gap: Option<usize>,
+    layout: Option<u16>,
     note: String,
 }
 
@@ -1031,6 +1061,7 @@ impl Verdict {
         Self {
             category,
             gap: None,
+            layout: None,
             note: String::new(),
         }
     }
@@ -1039,6 +1070,7 @@ impl Verdict {
         Self {
             category,
             gap: None,
+            layout: None,
             note,
         }
     }
@@ -1116,6 +1148,10 @@ fn classify(image: &Image<'_>, record: &CatalogRecord, overflow: &Overflow) -> V
                 _ => "decoded_other",
             },
             gap: Some(gap),
+            layout: Some(u16::from_le_bytes([
+                blob[descriptor.start + 6],
+                blob[descriptor.start + 7],
+            ])),
             note: String::new(),
         },
         Err(error) => Verdict::with_note("decode_error", format!("{error:#}")),
@@ -1127,6 +1163,8 @@ struct Survey {
     bodies: u64,
     counts: std::collections::BTreeMap<&'static str, u64>,
     gaps: std::collections::BTreeMap<usize, u64>,
+    layouts: std::collections::BTreeMap<u16, u64>,
+    layout5_names: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -1136,6 +1174,15 @@ impl Survey {
         *self.counts.entry(verdict.category).or_default() += 1;
         if let Some(gap) = verdict.gap {
             *self.gaps.entry(gap).or_default() += 1;
+        }
+        if let Some(layout) = verdict.layout {
+            *self.layouts.entry(layout).or_default() += 1;
+            if layout == 5 {
+                self.layout5_names.push(format!(
+                    "layout5\tobject {object_id}\t{}",
+                    String::from_utf8_lossy(name),
+                ));
+            }
         }
         let flagged = HARD_CATEGORIES.contains(&verdict.category)
             || matches!(
@@ -1167,6 +1214,14 @@ impl Survey {
         println!("table gap (bytes: decoded descriptors):");
         for (gap, count) in &self.gaps {
             println!("  {gap}: {count}");
+        }
+        println!("descriptor layouts:");
+        for (layout, count) in &self.layouts {
+            println!("  {layout}: {count}");
+        }
+        println!("layout 5 objects:");
+        for name in &self.layout5_names {
+            println!("{name}");
         }
         for note in &self.notes {
             println!("{note}");

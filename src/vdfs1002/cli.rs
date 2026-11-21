@@ -2,10 +2,15 @@ use super::{Image, select_file};
 use crate::cli::UnpackArgs;
 use crate::crc::kernel_crc32;
 use anyhow::{Context, Result, bail};
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::{Compression, write::GzEncoder};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
+
+const IGZP_LAYOUT: u16 = 4;
+const IGZP_GAP_BASE: usize = 144;
+const IGZP_TABLE_ENTRY: usize = 16;
+const IGZP_COUNT: usize = 1;
 
 pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     let modes = [args.audit, args.list, args.extract.is_some()]
@@ -18,16 +23,15 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     if args.parent.is_some() && !args.list && args.extract.is_none() {
         bail!("--parent needs --list or --extract");
     }
-    if modes == 0
-        && (!args.include.is_empty()
-            || args.manifest_dir.is_some()
-            || args.aes_key.is_some()
-            || args.public_key.is_some())
-    {
-        bail!(
-            "--include, --manifest-dir, --aes-key and --public-key are not supported for VDFS1002 images"
-        );
+    if modes > 0 && !args.include.is_empty() {
+        bail!("--include is only supported by full VDFS1002 restoration");
     }
+    if modes == 0
+        && (args.manifest_dir.is_some() || args.aes_key.is_some() || args.public_key.is_some())
+    {
+        bail!("--manifest-dir, --aes-key and --public-key are not supported for VDFS1002 images");
+    }
+    super::validate_selection(&args.include)?;
 
     if args.patch_tif {
         let output = args
@@ -54,7 +58,7 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         logical[at_count..at_count + 2].copy_from_slice(b"\x00\x29");
         logical[at_bmi..at_bmi + 2].copy_from_slice(b"\x35\xd4");
 
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&logical)?;
         let compressed = encoder.finish()?;
         eprintln!(
@@ -64,7 +68,12 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
             raw.len()
         );
         let blob_size = raw.len();
-        let table = blob_size - 48;
+        let gap = IGZP_GAP_BASE + IGZP_TABLE_ENTRY * IGZP_COUNT;
+        let table = blob_size
+            .checked_sub(32)
+            .and_then(|value| value.checked_sub(gap))
+            .and_then(|value| value.checked_sub(IGZP_TABLE_ENTRY))
+            .context("TIF raw blob is too small for IGzp layout")?;
         if compressed.len() > table {
             bail!(
                 "patched compressed blob needs {} bytes, but original object has {} bytes before the table",
@@ -78,10 +87,10 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         blob[table + 2..table + 4].copy_from_slice(&0u16.to_le_bytes());
         blob[table + 4..table + 8].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
         blob[table + 8..table + 16].copy_from_slice(&0u64.to_le_bytes());
-        let descriptor = table + 16;
-        blob[descriptor..descriptor + 4].copy_from_slice(b"CZip");
+        let descriptor = blob_size - 32;
+        blob[descriptor..descriptor + 4].copy_from_slice(b"IGzp");
         blob[descriptor + 4..descriptor + 6].copy_from_slice(&1u16.to_le_bytes());
-        blob[descriptor + 6..descriptor + 8].copy_from_slice(&4u16.to_le_bytes());
+        blob[descriptor + 6..descriptor + 8].copy_from_slice(&IGZP_LAYOUT.to_le_bytes());
         blob[descriptor + 8..descriptor + 16]
             .copy_from_slice(&(logical.len() as u64).to_le_bytes());
         blob[descriptor + 16..descriptor + 20].fill(0);
@@ -96,6 +105,23 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         let written = catalog_reader.replace_file_blob(record, &overflow, image_bytes, &blob)?;
         std::fs::write(output, image_bytes)
             .with_context(|| format!("Failed to write patched image: {}", output.display()))?;
+        let patched = std::fs::read(output)
+            .with_context(|| format!("Failed to reread patched image: {}", output.display()))?;
+        let patched_reader = Image::open(&patched)?;
+        let patched_records = patched_reader.catalog_records()?;
+        let patched_record = select_file(&patched_records, "TIFSDaemon", None)?;
+        let patched_overflow = patched_reader.overflow_extents()?;
+        let restored = patched_reader.file_contents(patched_record, &patched_overflow)?;
+        if restored != logical {
+            bail!(
+                "patched TIFSDaemon round-trip mismatch: got {} bytes, expected {}",
+                restored.len(),
+                logical.len(),
+            );
+        }
+        if blob[descriptor + 6..descriptor + 8] != IGZP_LAYOUT.to_le_bytes() {
+            bail!("patched TIFSDaemon descriptor layout is not layout {IGZP_LAYOUT}");
+        }
         println!(
             "{}",
             serde_json::json!({
@@ -175,7 +201,7 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     }
     println!("VDFS1002 Image");
     println!("Extracting to: {}", output_dir.display());
-    let summary = super::restore(image_bytes, &output_dir)?;
+    let summary = super::restore_selected(image_bytes, &output_dir, &args.include)?;
     if !summary.extended_checksum_valid {
         eprintln!("  Warning: extended record checksum mismatch");
     }
@@ -201,4 +227,19 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     }
     println!("Done!");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IGZP_COUNT, IGZP_GAP_BASE, IGZP_LAYOUT, IGZP_TABLE_ENTRY};
+
+    #[test]
+    fn synthetic_tif_igzp_uses_layout4() {
+        assert_eq!(IGZP_LAYOUT, 4);
+    }
+
+    #[test]
+    fn synthetic_tif_igzp_gap_is_crc_pinned() {
+        assert_eq!(IGZP_GAP_BASE + IGZP_TABLE_ENTRY * IGZP_COUNT, 160,);
+    }
 }
