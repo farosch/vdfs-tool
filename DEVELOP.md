@@ -20,12 +20,22 @@ support remains format-specific open work.
 VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
 v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
 SHA-1, SHA-256, RSA1024, and RSA2048 descriptor trailers. It does not provide
-vendor trust enrollment or verify superblock signatures.
+device authorization claims.
+
+VDFS4 superblocks can be verified against RSA1024 or RSA2048 public keys using
+SHA-1, SHA-256, or MD5 as selected by the on-disk hash type. Trust anchors may
+be supplied with `--public-key`, `--trust-key`, or `--trust-dir`, or enrolled
+persistently with `vdfs-tool trust enroll`.
+
+VDFS1002 descriptor and superblock RSA verification remains unsupported until
+its signature layouts are confirmed by a real fixture. VDFS1002 audit output
+reports this status explicitly and must not be interpreted as device
+authorization.
 
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (105 passing unit tests + 1 ignored survey, plus integration fixtures)
+cargo test --locked                  # all tests (110 passing unit tests + 1 ignored survey, plus integration fixtures)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)

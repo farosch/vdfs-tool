@@ -11,20 +11,20 @@ pub struct ImageReader<'a> {
     pub snapshot: SnapshotInfo,
     /// 16-byte AES-128 key for encrypted chunks; `None` if no key was supplied.
     pub aes_key: Option<[u8; 16]>,
-    /// Optional RSA public key used to verify hashed VDFS4 descriptor signatures.
-    pub rsa_public_key: Option<rsa::RsaPublicKey>,
+    /// RSA public keys trusted for VDFS4 descriptor and superblock signatures.
+    pub rsa_public_keys: Vec<rsa::RsaPublicKey>,
 }
 
 impl<'a> ImageReader<'a> {
-    pub fn new(image: &'a [u8]) -> Result<Self> {
-        let sbi = super::superblock::read_superblock(image)?;
+    pub fn new_with_keys(image: &'a [u8], rsa_public_keys: &[rsa::RsaPublicKey]) -> Result<Self> {
+        let sbi = super::superblock::read_superblock_with_keys(image, rsa_public_keys)?;
         let snapshot = super::snapshot::build_snapshot_manager(&sbi, image)?;
         Ok(Self {
             image,
             sbi,
             snapshot,
             aes_key: None,
-            rsa_public_key: None,
+            rsa_public_keys: rsa_public_keys.to_vec(),
         })
     }
 

@@ -54,7 +54,23 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
         bail!("Output path already exists: {}", output_dir.display());
     }
 
-    let mut reader = reader::ImageReader::new(image)?;
+    let mut rsa_public_keys = Vec::new();
+    for key_path in &args.public_key {
+        rsa_public_keys.push(authentication::read_public_key(key_path)?);
+    }
+    for key_path in &args.trust_key {
+        rsa_public_keys.push(authentication::read_public_key(key_path)?);
+    }
+    for store in &args.trust_dir {
+        rsa_public_keys.extend(crate::trust::load_store(store)?);
+    }
+    if rsa_public_keys.is_empty()
+        && let Ok(default_store) = crate::trust::default_store()
+    {
+        rsa_public_keys.extend(crate::trust::load_store(&default_store)?);
+    }
+
+    let mut reader = reader::ImageReader::new_with_keys(image, &rsa_public_keys)?;
     if let Some(key_path) = args.aes_key.as_deref() {
         let raw = std::fs::read(key_path)
             .with_context(|| format!("Failed to read AES key: {}", key_path.display()))?;
@@ -64,10 +80,6 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
             .with_context(|| format!("AES key must be exactly 16 bytes: {}", key_path.display()))?;
         reader.aes_key = Some(key);
     }
-    if let Some(public_key_path) = args.public_key.as_deref() {
-        reader.rsa_public_key = Some(authentication::read_public_key(public_key_path)?);
-    }
-
     if args.list {
         return list_records(&reader, args);
     }
@@ -209,6 +221,18 @@ fn audit_records(reader: &reader::ImageReader) -> Result<()> {
             "fork_consistent": fork_consistent,
             "fork_inconsistent": fork_inconsistent,
             "volume_blocks": reader.sbi.volume_blocks_count,
+            "authentication": match reader.sbi.superblock_signature {
+                Some(status) => serde_json::json!({
+                    "superblock_signed": true,
+                    "sign_type": status.sign_type,
+                    "hash_type": status.hash_type,
+                    "verified": status.verified,
+                }),
+                None => serde_json::json!({
+                    "superblock_signed": false,
+                    "verified": false,
+                }),
+            },
         }))?
     );
     Ok(())
@@ -341,7 +365,9 @@ mod tests {
             include: Vec::new(),
             manifest_dir: None,
             aes_key: None,
-            public_key: None,
+            public_key: Vec::new(),
+            trust_key: Vec::new(),
+            trust_dir: Vec::new(),
             force: false,
             list: false,
             json: false,

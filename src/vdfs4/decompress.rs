@@ -203,11 +203,7 @@ pub fn decompress_file(
     }
     let data = extents_read_data(reader, &extents, 0, comp_total)?;
 
-    decompress_blob_keyed(
-        &data,
-        reader.aes_key.as_ref(),
-        reader.rsa_public_key.as_ref(),
-    )
+    decompress_blob_keyed(&data, reader.aes_key.as_ref(), &reader.rsa_public_keys)
 }
 
 // Layout-05 compressed descriptor (32 bytes; VDFS2006 images such as JazzM).
@@ -254,7 +250,7 @@ fn layout5_chunk(data: &[u8], table: usize, index: usize) -> Result<Layout5Chunk
     Ok(Layout5Chunk { flags, start, len })
 }
 
-fn decompress_layout5(data: &[u8], rsa_public_key: Option<&rsa::RsaPublicKey>) -> Result<Vec<u8>> {
+fn decompress_layout5(data: &[u8], rsa_public_keys: &[rsa::RsaPublicKey]) -> Result<Vec<u8>> {
     let descriptor = data.len() - VDFS4_COMPR_FILE_DESC_LEN_05;
     let magic = &data[descriptor..descriptor + 4];
     let ctype = detect_compr_type(magic).context("unknown compression type in descriptor")?;
@@ -313,12 +309,15 @@ fn decompress_layout5(data: &[u8], rsa_public_key: Option<&rsa::RsaPublicKey>) -
             Some(available) if available == 0 || available == 128 || available == 256 => available,
             _ => 0,
         };
-        if let Some(public_key) = rsa_public_key
-            && signature_len > 0
-        {
+        if !rsa_public_keys.is_empty() && signature_len > 0 {
             let signed = &data[table + 16 * count..table + 16 * count + digest_len * (count + 1)];
             let signature = &data[signature_offset..signature_offset + signature_len];
-            super::authentication::verify_signature(public_key, signed, signature, magic[0])?;
+            super::authentication::verify_signature_any(
+                rsa_public_keys,
+                signed,
+                signature,
+                magic[0],
+            )?;
         }
     }
 
@@ -600,16 +599,16 @@ fn decrypt_chunk(
 
 #[cfg(test)]
 fn decompress_blob(data: &[u8]) -> Result<Vec<u8>> {
-    decompress_blob_keyed(data, None, None)
+    decompress_blob_keyed(data, None, &[])
 }
 
 fn decompress_blob_keyed(
     data: &[u8],
     key: Option<&AesKey>,
-    rsa_public_key: Option<&rsa::RsaPublicKey>,
+    rsa_public_keys: &[rsa::RsaPublicKey],
 ) -> Result<Vec<u8>> {
     if is_layout5_blob(data) {
-        return decompress_layout5(data, rsa_public_key);
+        return decompress_layout5(data, rsa_public_keys);
     }
     let descr_offset =
         find_descriptor(data).context("Could not locate compressed file descriptor")?;
@@ -657,9 +656,7 @@ fn decompress_blob_keyed(
         if hash.as_slice() != &data[start..start + digest_len] {
             bail!("Compressed descriptor digest mismatch");
         }
-        if let Some(public_key) = rsa_public_key
-            && matches!(descr.sign_type, 1 | 2)
-        {
+        if matches!(descr.sign_type, 1 | 2) && !rsa_public_keys.is_empty() {
             let signed_len = digest_len * (comp_extents_count + 1);
             let signature_len = match descr.sign_type {
                 1 => 128,
@@ -675,8 +672,8 @@ fn decompress_blob_keyed(
             if signature_end > descr_offset {
                 bail!("RSA signature exceeds compressed descriptor");
             }
-            super::authentication::verify_signature(
-                public_key,
+            super::authentication::verify_signature_any(
+                rsa_public_keys,
                 &data[hash_offset..signed_end],
                 &data[signed_end..signature_end],
                 descr.magic[0],
