@@ -10,6 +10,9 @@ and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
 `pack --format vdfs1002` writes a native VDFS1002 image with catalog, index,
 leaf, and extent-backed file records.
 
+Unpacking refuses an existing VDFS4 or VDFS1002 output path. Packing rejects
+`--layout 2006` with `--format vdfs1002` because VDFS1002 is not layout 2006.
+
 VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
 v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
 SHA-1, SHA-256, RSA1024, and RSA2048 descriptor trailers. It does not provide
@@ -18,7 +21,7 @@ vendor trust enrollment or verify superblock signatures.
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (98 unit + 1 ignored survey + 4 encrypted + 5 zlib + 1 hashed + 1 codec fixture + 2 unrecognized-image + 2 manifest-mode)
+cargo test --locked                  # all tests (104 passing unit tests + 1 ignored survey, plus integration fixtures)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)

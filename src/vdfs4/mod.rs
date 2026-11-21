@@ -34,6 +34,9 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
         let stem = args.input.file_stem().unwrap_or_default();
         PathBuf::from(format!("{}-extracted", stem.to_string_lossy()))
     });
+    if output_dir.exists() {
+        bail!("Output path already exists: {}", output_dir.display());
+    }
 
     let mut reader = reader::ImageReader::new(image)?;
     if let Some(key_path) = args.aes_key.as_deref() {
@@ -68,7 +71,9 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_vdfs4;
+    use super::{is_vdfs4, run};
+    use crate::cli::UnpackArgs;
+    use std::path::PathBuf;
 
     fn image_with(signature: &[u8], layout: &[u8]) -> Vec<u8> {
         let mut image = vec![0u8; 2048];
@@ -89,5 +94,38 @@ mod tests {
         assert!(!is_vdfs4(&image_with(b"XXXX", b"2007")));
         assert!(!is_vdfs4(&[0u8; 2048]));
         assert!(!is_vdfs4(&[0u8; 100]));
+    }
+
+    #[test]
+    fn vdfs4_unpack_refuses_existing_output_directory() {
+        let output =
+            std::env::temp_dir().join(format!("vdfs-tool-existing-output-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&output);
+        std::fs::create_dir_all(&output).unwrap();
+        let args = UnpackArgs {
+            input: PathBuf::from("unused.vdfs"),
+            output: Some(output.clone()),
+            include: Vec::new(),
+            manifest_dir: None,
+            aes_key: None,
+            public_key: None,
+            force: false,
+            list: false,
+            json: false,
+            audit: false,
+            extract: None,
+            parent: None,
+            patch_tif: false,
+        };
+
+        let result = run(&[0u8; 2048], &args);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Output path already exists")
+        );
+        let _ = std::fs::remove_dir_all(&output);
     }
 }

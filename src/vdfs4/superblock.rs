@@ -55,6 +55,9 @@ pub fn read_superblock(data: &[u8]) -> Result<SuperblockInfo> {
         }
     }
 
+    if sb.log_block_size >= 32 {
+        bail!("Unsupported block size order: {}", sb.log_block_size);
+    }
     let block_size = 1u32 << sb.log_block_size;
     if !matches!(block_size, 512 | 1024 | 2048 | 4096) {
         bail!("Unsupported block size: {}", block_size);
@@ -65,6 +68,12 @@ pub fn read_superblock(data: &[u8]) -> Result<SuperblockInfo> {
             "Super page order ({}) < block size order ({})",
             sb.log_super_page_size,
             sb.log_block_size
+        );
+    }
+    if sb.log_super_page_size >= 32 {
+        bail!(
+            "Unsupported super page size order: {}",
+            sb.log_super_page_size
         );
     }
 
@@ -99,4 +108,46 @@ pub fn read_superblock(data: &[u8]) -> Result<SuperblockInfo> {
     };
 
     Ok(info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_header() -> Vec<u8> {
+        let mut image = vec![0u8; SECTOR_SIZE * 8];
+        let sb_offset = SECTOR_SIZE * 2;
+        image[sb_offset..sb_offset + 4].copy_from_slice(VDFS4_SB_SIGNATURE);
+        image[sb_offset + 4..sb_offset + 8].copy_from_slice(VDFS4_LAYOUT_VERSION_2007);
+        let block_order = std::mem::offset_of!(Vdfs4SuperBlock, log_block_size);
+        let page_order = std::mem::offset_of!(Vdfs4SuperBlock, log_super_page_size);
+        image[sb_offset + block_order] = 12;
+        image[sb_offset + page_order] = 14;
+        let exsb = sb_offset + SECTOR_SIZE;
+        let layout = exsb + SECTOR_SIZE;
+        let _ = (layout, exsb);
+        image
+    }
+
+    #[test]
+    fn rejects_impossible_block_order_before_shift() {
+        let mut image = build_header();
+        let sb_offset = SECTOR_SIZE * 2;
+        let block_order = std::mem::offset_of!(Vdfs4SuperBlock, log_block_size);
+        image[sb_offset + block_order] = u8::MAX;
+
+        let error = read_superblock(&image).err().expect("expected read error");
+        assert!(error.to_string().contains("block size order"));
+    }
+
+    #[test]
+    fn rejects_impossible_super_page_order() {
+        let mut image = build_header();
+        let sb_offset = SECTOR_SIZE * 2;
+        let page_order = std::mem::offset_of!(Vdfs4SuperBlock, log_super_page_size);
+        image[sb_offset + page_order] = u8::MAX;
+
+        let error = read_superblock(&image).err().expect("expected read error");
+        assert!(error.to_string().contains("super page size order"));
+    }
 }

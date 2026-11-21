@@ -34,11 +34,17 @@ impl<'a> ImageReader<'a> {
 
         let block_nr =
             meta_iblock_to_block(&self.sbi, meta_iblock).context("meta_iblock_to_block failed")?;
+        let byte_offset = block_nr
+            .checked_mul(self.sbi.block_size as u64)
+            .context("Meta page byte offset overflows")?;
+        let node_size = (self.sbi.block_size as u64)
+            .checked_mul(self.sbi.blocks_per_super_page() as u64)
+            .context("Meta page size overflows")?;
+        let byte_end = byte_offset
+            .checked_add(node_size)
+            .context("Meta page range overflows")?;
 
-        let byte_offset = block_nr as usize * self.sbi.block_size;
-        let node_size = self.sbi.block_size * self.sbi.blocks_per_super_page();
-
-        if byte_offset + node_size > self.image.len() {
+        if byte_end > self.image.len() as u64 {
             bail!(
                 "Meta page out of bounds: block={}, byte_offset={}, node_size={}",
                 block_nr,
@@ -46,8 +52,9 @@ impl<'a> ImageReader<'a> {
                 node_size
             );
         }
-
-        Ok(self.image[byte_offset..byte_offset + node_size].to_vec())
+        let start = usize::try_from(byte_offset).context("Meta page byte offset is too large")?;
+        let end = usize::try_from(byte_end).context("Meta page end is too large")?;
+        Ok(self.image[start..end].to_vec())
     }
 
     pub fn read_bnode_data(&self, tree_ino: u64, node_id: u32) -> Result<Vec<u8>> {
