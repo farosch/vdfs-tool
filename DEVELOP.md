@@ -31,6 +31,8 @@ the resulting live-compatible VDFS1002 descriptor to layout 5. The reader
 accepts both layouts 4 and 5. Regressions are:
 `cargo test --locked --bin vdfs-tool synthetic_tif_czip_uses_layout5` and
 `cargo test --locked --bin vdfs-tool accepts_layout5_descriptor`.
+After writing a patched image, `--patch-tif` reopens it and requires the
+TIFSDaemon round trip to return the exact guarded logical payload.
 
 Focused decompression tests (layout 5, layout 6, digests and AES):
 `cargo test --locked --bin vdfs-tool vdfs4::decompress`.

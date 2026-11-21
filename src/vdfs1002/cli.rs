@@ -98,6 +98,23 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         let written = catalog_reader.replace_file_blob(record, &overflow, image_bytes, &blob)?;
         std::fs::write(output, image_bytes)
             .with_context(|| format!("Failed to write patched image: {}", output.display()))?;
+        let patched = std::fs::read(output)
+            .with_context(|| format!("Failed to reread patched image: {}", output.display()))?;
+        let patched_reader = Image::open(&patched)?;
+        let patched_records = patched_reader.catalog_records()?;
+        let patched_record = select_file(&patched_records, "TIFSDaemon", None)?;
+        let patched_overflow = patched_reader.overflow_extents()?;
+        let restored = patched_reader.file_contents(patched_record, &patched_overflow)?;
+        if restored != logical {
+            bail!(
+                "patched TIFSDaemon round-trip mismatch: got {} bytes, expected {}",
+                restored.len(),
+                logical.len(),
+            );
+        }
+        if blob[descriptor + 6..descriptor + 8] != CZIP_LAYOUT.to_le_bytes() {
+            bail!("patched TIFSDaemon descriptor layout is not layout {CZIP_LAYOUT}");
+        }
         println!(
             "{}",
             serde_json::json!({
