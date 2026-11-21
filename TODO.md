@@ -6,11 +6,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 ## Packing
 
 - Validate large multi-chunk blobs on confirmed device layouts.
-- Preserve VDFS1002 `IGzp` layout-4 table-gap and descriptor-CRC behavior.
-  The synthetic `TIFSDaemon` patch now uses the real one-chunk gap
-  `144 + 16*count` (160 bytes), round-trips exactly, and a live synthetic
-  boot passed layout/CRC decompression. Validate the same behavior across
-  additional real layout-4 objects and nontrivial chunk counts.
 - Confirm layout-5 real-image compatibility. The reader accepts layout-5
   descriptors and has synthetic coverage, but HawkM p22 survey evidence found
   45,285 layout-4 descriptors and no original layout-5 objects. Preserve layout
