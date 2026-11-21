@@ -14,10 +14,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 
 ## VDFS authentication
 
-- VDFS1002 synthetic `TIFSDaemon` patching reaches a live RSA-signature
-  mismatch for inode 61098. Preserve the modified payloads, but do not claim
-  authorization or a device-side bypass. Vendor descriptor/public-key trust
-  and signed layout-4 IGzp verification remain open.
 - Identify the actual JazzM device kernel's handling of `h` descriptors.
   The public Linux 3.10.30 tree rejects `h`, while the sampled image contains
   3,291 such descriptors with matching SHA-256 chunk digests. Resolve this
