@@ -6,9 +6,23 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
 ## Packing
 
 - Validate large multi-chunk blobs on confirmed device layouts.
+- Preserve VDFS1002 `IGzp` layout-4 table-gap and descriptor-CRC behavior.
+  The synthetic `TIFSDaemon` patch now uses the real one-chunk gap
+  `144 + 16*count` (160 bytes), round-trips exactly, and a live synthetic
+  boot passed layout/CRC decompression. Validate the same behavior across
+  additional real layout-4 objects and nontrivial chunk counts.
+- Complete layout-5 real-image support. The reader now accepts layout-5
+  descriptors and has synthetic coverage, but HawkM p22 survey evidence found
+  45,285 layout-4 descriptors and no original layout-5 objects. Preserve layout
+  5 support and obtain a confirmed layout-5 real-image fixture before claiming
+  device compatibility.
 
 ## VDFS authentication
 
+- VDFS1002 synthetic `TIFSDaemon` patching reaches a live RSA-signature
+  mismatch for inode 61098. Preserve the modified payloads, but do not claim
+  authorization or a device-side bypass. Vendor descriptor/public-key trust
+  and signed layout-4 IGzp verification remain open.
 - Identify the actual JazzM device kernel's handling of `h` descriptors.
   The public Linux 3.10.30 tree rejects `h`, while the sampled image contains
   3,291 such descriptors with matching SHA-256 chunk digests. Resolve this
