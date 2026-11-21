@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(&bytes[1024..1028], b"VDFS");
         assert_eq!(&bytes[1028..1032], b"2007");
 
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         assert_eq!(reader.snapshot.tables[0].len(), 2);
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();
         let records = cat.collect_all_records().unwrap();
@@ -975,7 +975,7 @@ mod tests {
         let bytes = fs::read(&image).unwrap();
         assert_eq!(&bytes[1024..1028], b"VDFS");
         assert_eq!(&bytes[1028..1032], b"2006");
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
         assert_eq!(
             fs::read(output.join("root/hello.txt")).unwrap(),
@@ -1004,7 +1004,7 @@ mod tests {
 
         write_image(&root, &image, PackCompression::Zlib, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
         assert_eq!(fs::read(output.join("root/large.bin")).unwrap(), data);
 
@@ -1038,7 +1038,7 @@ mod tests {
 
         write_image(&root, &image, compression, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         super::super::unpacker::unpack_filesystem(&reader, &output, &[]).unwrap();
         assert_eq!(fs::read(output.join("root/sub/data.bin")).unwrap(), data);
 
@@ -1076,7 +1076,7 @@ mod tests {
 
         write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         assert!(reader.snapshot.tables[0].len() >= 2);
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();
         let records = cat.collect_all_records().unwrap();
@@ -1117,7 +1117,7 @@ mod tests {
         fs::hard_link(root.join("a.bin"), root.join("b.bin")).unwrap();
         write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();
         let records = cat.collect_all_records().unwrap();
         assert!(records.iter().any(|record| {
@@ -1144,7 +1144,7 @@ mod tests {
 
         write_image(&root, &image, PackCompression::None, PackLayout::Layout2007).unwrap();
         let bytes = fs::read(&image).unwrap();
-        let reader = super::super::reader::ImageReader::new(&bytes).unwrap();
+        let reader = super::super::reader::ImageReader::new_with_keys(&bytes, &[]).unwrap();
         let cat = super::super::cattree::open_cat_tree(&reader).unwrap();
         let records = cat.collect_all_records().unwrap();
         let file_record = records

@@ -461,6 +461,11 @@ impl Audit {
             "overflow_objects": self.overflow_objects,
             "overflow_extents": self.overflow_extents,
             "files_resolved": self.files_resolved,
+            "authentication": {
+                "superblock_rsa": "format-not-confirmed",
+                "descriptor_rsa": "format-not-confirmed",
+                "host_round_trip": "not-device-authorization",
+            },
         })
     }
 }

@@ -13,6 +13,8 @@ pub(crate) mod writer;
 
 use crate::cli::UnpackArgs;
 use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::PathBuf;
 
 /// Checks the superblock signature and layout version that `superblock::read_superblock` requires.
@@ -26,8 +28,22 @@ pub(crate) fn is_vdfs4(image: &[u8]) -> bool {
 }
 
 pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
-    if args.audit || args.list || args.extract.is_some() || args.parent.is_some() {
-        bail!("--audit, --list, --extract and --parent are only supported for VDFS1002 images");
+    if args.patch_tif {
+        bail!("--patch-tif is only supported for VDFS1002 images");
+    }
+
+    let read_modes = [args.audit, args.list, args.extract.is_some()]
+        .into_iter()
+        .filter(|enabled| *enabled)
+        .count();
+    if read_modes > 1 {
+        bail!("--audit, --list and --extract are mutually exclusive");
+    }
+    if args.parent.is_some() && !args.list && args.extract.is_none() {
+        bail!("--parent needs --list or --extract");
+    }
+    if read_modes > 0 && (!args.include.is_empty() || args.manifest_dir.is_some()) {
+        bail!("--include and --manifest-dir are only supported by full VDFS4 extraction");
     }
 
     let output_dir = args.output.clone().unwrap_or_else(|| {
@@ -38,7 +54,23 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
         bail!("Output path already exists: {}", output_dir.display());
     }
 
-    let mut reader = reader::ImageReader::new(image)?;
+    let mut rsa_public_keys = Vec::new();
+    for key_path in &args.public_key {
+        rsa_public_keys.push(authentication::read_public_key(key_path)?);
+    }
+    for key_path in &args.trust_key {
+        rsa_public_keys.push(authentication::read_public_key(key_path)?);
+    }
+    for store in &args.trust_dir {
+        rsa_public_keys.extend(crate::trust::load_store(store)?);
+    }
+    if rsa_public_keys.is_empty()
+        && let Ok(default_store) = crate::trust::default_store()
+    {
+        rsa_public_keys.extend(crate::trust::load_store(&default_store)?);
+    }
+
+    let mut reader = reader::ImageReader::new_with_keys(image, &rsa_public_keys)?;
     if let Some(key_path) = args.aes_key.as_deref() {
         let raw = std::fs::read(key_path)
             .with_context(|| format!("Failed to read AES key: {}", key_path.display()))?;
@@ -48,8 +80,14 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
             .with_context(|| format!("AES key must be exactly 16 bytes: {}", key_path.display()))?;
         reader.aes_key = Some(key);
     }
-    if let Some(public_key_path) = args.public_key.as_deref() {
-        reader.rsa_public_key = Some(authentication::read_public_key(public_key_path)?);
+    if args.list {
+        return list_records(&reader, args);
+    }
+    if args.audit {
+        return audit_records(&reader);
+    }
+    if let Some(name) = args.extract.as_deref() {
+        return extract_file(&reader, name, args.parent, args.output.as_deref());
     }
 
     println!("VDFS4 Image Info:");
@@ -66,6 +104,225 @@ pub(crate) fn run(image: &[u8], args: &UnpackArgs) -> Result<()> {
     manifest::finish()?;
 
     println!("Done!");
+    Ok(())
+}
+
+fn record_type_name(record_type: u8) -> &'static str {
+    match record_type {
+        disk::VDFS4_CATALOG_FOLDER_RECORD => "folder",
+        disk::VDFS4_CATALOG_FILE_RECORD => "file",
+        disk::VDFS4_CATALOG_HLINK_RECORD => "hardlink",
+        disk::VDFS4_CATALOG_ILINK_RECORD => "indirect_link",
+        _ => "unknown",
+    }
+}
+
+fn list_records(reader: &reader::ImageReader, args: &UnpackArgs) -> Result<()> {
+    let cat_tree = cattree::open_cat_tree(reader)?;
+    let records = cat_tree.collect_all_records()?;
+    let rows: Vec<&Vec<u8>> = records
+        .iter()
+        .filter(|record| {
+            args.parent
+                .is_none_or(|id| disk::cattree_key_parent_id(record) == id)
+        })
+        .collect();
+
+    if args.json {
+        let values: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|record| {
+                let record_type = disk::cattree_key_record_type(record);
+                serde_json::json!({
+                    "parent_id": disk::cattree_key_parent_id(record),
+                    "object_id": disk::cattree_key_object_id(record),
+                    "type": record_type_name(record_type),
+                    "name": String::from_utf8_lossy(disk::cattree_key_name(record)),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "record_count": values.len(),
+                "records": values,
+            }))?
+        );
+    } else {
+        for record in rows {
+            println!(
+                "{}\t{}\t{}\t{}",
+                disk::cattree_key_parent_id(record),
+                disk::cattree_key_object_id(record),
+                record_type_name(disk::cattree_key_record_type(record)),
+                String::from_utf8_lossy(disk::cattree_key_name(record)),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn audit_records(reader: &reader::ImageReader) -> Result<()> {
+    let cat_tree = cattree::open_cat_tree(reader)?;
+    let records = cat_tree.collect_all_records()?;
+    let overflow = extents::build_extent_overflow_map(reader, &extents::open_ext_tree(reader)?)?;
+
+    let mut folders = 0u64;
+    let mut files = 0u64;
+    let mut hardlinks = 0u64;
+    let mut indirect_links = 0u64;
+    let mut fork_consistent = 0u64;
+    let mut fork_inconsistent = 0u64;
+
+    for record in &records {
+        match disk::cattree_key_record_type(record) {
+            disk::VDFS4_CATALOG_FOLDER_RECORD => folders += 1,
+            disk::VDFS4_CATALOG_FILE_RECORD => {
+                files += 1;
+                let key_len = disk::cattree_key_key_len(record);
+                let value = record
+                    .get(key_len..)
+                    .context("Truncated VDFS4 file record")?;
+                if value.len() < std::mem::size_of::<disk::Vdfs4CatalogFileRecord>() {
+                    fork_inconsistent += 1;
+                    continue;
+                }
+                let file: disk::Vdfs4CatalogFileRecord =
+                    unsafe { std::ptr::read_unaligned(value.as_ptr().cast()) };
+                let object_id = disk::cattree_key_object_id(record);
+                let resolved = extents::extents_resolve_fork(
+                    &file.fork,
+                    file.fork.size_in_bytes,
+                    &overflow,
+                    object_id,
+                );
+                match resolved {
+                    Ok(extents) if !extents.is_empty() => fork_consistent += 1,
+                    Ok(_) if file.fork.size_in_bytes == 0 => fork_consistent += 1,
+                    _ => fork_inconsistent += 1,
+                }
+            }
+            disk::VDFS4_CATALOG_HLINK_RECORD => hardlinks += 1,
+            disk::VDFS4_CATALOG_ILINK_RECORD => indirect_links += 1,
+            _ => {}
+        }
+    }
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "catalog_records": records.len(),
+            "folders": folders,
+            "files": files,
+            "hardlinks": hardlinks,
+            "indirect_links": indirect_links,
+            "overflow_objects": overflow.len(),
+            "overflow_records": overflow.values().map(|items| items.len()).sum::<usize>(),
+            "fork_consistent": fork_consistent,
+            "fork_inconsistent": fork_inconsistent,
+            "volume_blocks": reader.sbi.volume_blocks_count,
+            "authentication": match reader.sbi.superblock_signature {
+                Some(status) => serde_json::json!({
+                    "superblock_signed": true,
+                    "sign_type": status.sign_type,
+                    "hash_type": status.hash_type,
+                    "verified": status.verified,
+                }),
+                None => serde_json::json!({
+                    "superblock_signed": false,
+                    "verified": false,
+                }),
+            },
+        }))?
+    );
+    Ok(())
+}
+
+fn extract_file(
+    reader: &reader::ImageReader,
+    name: &str,
+    parent: Option<u64>,
+    output: Option<&std::path::Path>,
+) -> Result<()> {
+    let output = output.context("--extract requires -o/--output")?;
+    if output.exists() {
+        bail!("Extract output already exists: {}", output.display());
+    }
+
+    let cat_tree = cattree::open_cat_tree(reader)?;
+    let records = cat_tree.collect_all_records()?;
+    let candidates: Vec<&Vec<u8>> = records
+        .iter()
+        .filter(|record| {
+            let record_type = disk::cattree_key_record_type(record);
+            (record_type == disk::VDFS4_CATALOG_FILE_RECORD
+                || record_type == disk::VDFS4_CATALOG_HLINK_RECORD)
+                && disk::cattree_key_name(record) == name.as_bytes()
+                && parent.is_none_or(|id| disk::cattree_key_parent_id(record) == id)
+        })
+        .collect();
+    let record = match candidates.as_slice() {
+        [record] => *record,
+        _ => bail!(
+            "{} file records named {name:?}; narrow with --parent",
+            candidates.len()
+        ),
+    };
+
+    let target = if disk::cattree_key_record_type(record) == disk::VDFS4_CATALOG_HLINK_RECORD {
+        let target_id = disk::cattree_key_object_id(record);
+        records
+            .iter()
+            .find(|candidate| {
+                disk::cattree_key_record_type(candidate) == disk::VDFS4_CATALOG_FILE_RECORD
+                    && disk::cattree_key_object_id(candidate) == target_id
+            })
+            .context("Could not resolve VDFS4 hard-link target")?
+    } else {
+        record
+    };
+
+    let key_len = disk::cattree_key_key_len(target);
+    let value = target
+        .get(key_len..)
+        .context("Truncated VDFS4 file catalog record")?;
+    if value.len() < std::mem::size_of::<disk::Vdfs4CatalogFileRecord>() {
+        bail!("Truncated VDFS4 file catalog record");
+    }
+    let file: disk::Vdfs4CatalogFileRecord =
+        unsafe { std::ptr::read_unaligned(value.as_ptr().cast()) };
+    let object_id = disk::cattree_key_object_id(target);
+    let overflow = extents::build_extent_overflow_map(reader, &extents::open_ext_tree(reader)?)?;
+    let fork = file.fork;
+    let contents = if decompress::is_compressed_file(file.common.flags) {
+        decompress::decompress_file(reader, &fork, object_id, &overflow)?
+    } else if fork.total_blocks_count == 0 {
+        let len = usize::try_from(fork.size_in_bytes)?;
+        if len > fork.inline_data().len() {
+            bail!("Inline VDFS4 file size exceeds fork");
+        }
+        fork.inline_data()[..len].to_vec()
+    } else {
+        let extents =
+            extents::extents_resolve_fork(&fork, fork.size_in_bytes, &overflow, object_id)?;
+        extents::extents_read_data(reader, &extents, 0, fork.size_in_bytes)?
+    };
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+        .with_context(|| format!("Failed to create output: {}", output.display()))?;
+    file.write_all(&contents)?;
+    let digest = format!("{:x}", Sha256::digest(&contents));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "output": output.display().to_string(),
+            "size": contents.len(),
+            "sha256": digest,
+        }))?
+    );
     Ok(())
 }
 
@@ -108,7 +365,9 @@ mod tests {
             include: Vec::new(),
             manifest_dir: None,
             aes_key: None,
-            public_key: None,
+            public_key: Vec::new(),
+            trust_key: Vec::new(),
+            trust_dir: Vec::new(),
             force: false,
             list: false,
             json: false,

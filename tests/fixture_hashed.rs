@@ -34,13 +34,14 @@ fn extract(name: &str, file: &str) -> PathBuf {
     let out =
         std::env::temp_dir().join(format!("vdfs-unpack-hashed-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
-    let status = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"))
+    let binary = env!("CARGO_BIN_EXE_vdfs-tool");
+    let status = Command::new(binary)
         .arg("unpack")
         .arg(fixture_path(file))
         .arg("-o")
         .arg(&out)
         .status()
-        .expect("failed to run vdfs-unpack");
+        .unwrap_or_else(|error| panic!("failed to run {binary}: {error}"));
     assert!(status.success(), "vdfs-unpack exited with {status}");
     out
 }
