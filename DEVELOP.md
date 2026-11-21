@@ -120,6 +120,16 @@ Always pass `--locked`; `Cargo.lock` is pinned.
   macOS. Unix-only dependencies must be declared with `target.'cfg(unix)'`
   so Windows builds do not compile Unix APIs.
 
+Release (`.github/workflows/release.yml`) runs on every push to `main`. It runs
+the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
+`x86_64-pc-windows-msvc`, `aarch64-apple-darwin` and `x86_64-apple-darwin`. It
+publishes a GitHub release tagged `v<version>` from the `version` field in
+`Cargo.toml`. If that tag already exists, the release is skipped, so bump the
+version before merging a release.
+Package names are set as the `package` step's `archive` output and consumed by
+the upload-artifact step. Verify release workflow regressions with
+`python -m unittest discover -s .github/tests -p 'test_*.py'`.
+
 
 Coding rules (module layout, error handling, tests, comments) are in
 [CONVENTIONS.md](CONVENTIONS.md).
