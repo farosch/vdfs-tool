@@ -42,3 +42,19 @@ jobs:
 
       - name: Run lints
         run: cargo clippy --locked --all-targets
+
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Build Windows binary
+        run: cargo build --locked --target x86_64-pc-windows-msvc

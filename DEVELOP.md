@@ -103,6 +103,9 @@ Always pass `--locked`; `Cargo.lock` is pinned.
 - The release version is the next patch version after the highest existing
   `vMAJOR.MINOR.PATCH` tag. It is applied to `Cargo.toml`, `Cargo.lock`, and
   the binaries without changing or committing the source version in place.
+- Release builds must compile on Linux, Windows MSVC, Intel macOS, and ARM
+  macOS. Unix-only dependencies must be declared with `target.'cfg(unix)'`
+  so Windows builds do not compile Unix APIs.
 
 
 Coding rules (module layout, error handling, tests, comments) are in
