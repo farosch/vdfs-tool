@@ -17,8 +17,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Run tests
-        run: cargo test --locked
+        run: |
+          cargo test --locked
+          python -m unittest discover -s .github/tests -p 'test_*.py'
 
   version:
     needs: test
@@ -33,22 +39,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Calculate next release version
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
-          if [ -n "$latest" ]; then
-            current=${latest#v}
-            major=$(echo "$current" | cut -d. -f1)
-            minor=$(echo "$current" | cut -d. -f2)
-            patch=$(echo "$current" | cut -d. -f3)
-            version="$major.$minor.$((patch + 1))"
-          else
-            version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          fi
-          tag="v$version"
+          tag=$(python .github/scripts/next_release_tag.py)
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "new=true" >> "$GITHUB_OUTPUT"
 

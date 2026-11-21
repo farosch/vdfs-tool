@@ -237,8 +237,8 @@ submit a pull request to `develop`. After merging approved changes into
 
 Pull requests targeting `develop` run formatting, tests, and Clippy. A push to
 `main` runs the full test and cross-platform release pipeline. Releases use
-the next patch version after the highest existing `vMAJOR.MINOR.PATCH` tag,
-without requiring a manual `Cargo.toml` version bump.
+`vYEAR.MONTH.INCREMENT`, based on the UTC build year and month and incremented
+from 1 for each month, without requiring a manual `Cargo.toml` version bump.
 
 Pull requests also build the `x86_64-pc-windows-msvc` target to prevent
 Unix-only dependencies or APIs from reaching the release pipeline.

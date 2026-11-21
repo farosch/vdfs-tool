@@ -45,6 +45,9 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 `VDFS1002_SURVEY_IMAGE=<image> cargo test --release --locked -- --ignored survey_compressed_descriptors --nocapture`.
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
+Release-tag regressions:
+`python -m unittest discover -s .github/tests -p 'test_*.py'`.
+
 `unpack --patch-tif` preserves the original `IGzp` codec and pins the
 live-compatible VDFS1002 descriptor to layout 4. The synthetic one-chunk table
 uses the IGzp gap formula `144 + 16*count`, giving a 160-byte gap for count 1.
@@ -113,8 +116,10 @@ Always pass `--locked`; `Cargo.lock` is pinned.
 - A push to `main` runs the release pipeline
   (`.github/workflows/release.yml`), builds all release targets, and creates a
   GitHub release automatically.
-- The release version is the next patch version after the highest existing
-  `vMAJOR.MINOR.PATCH` tag. It is applied to `Cargo.toml`, `Cargo.lock`, and
+- The release version uses `vYEAR.MONTH.INCREMENT`: the UTC build year and month,
+  with an increment starting at 1 for each month. Existing tags for the current
+  UTC month determine the next increment; malformed tags and tags for other
+  months are ignored. It is applied to `Cargo.toml`, `Cargo.lock`, and
   the binaries without changing or committing the source version in place.
 - Release builds must compile on Linux, Windows MSVC, Intel macOS, and ARM
   macOS. Unix-only dependencies must be declared with `target.'cfg(unix)'`

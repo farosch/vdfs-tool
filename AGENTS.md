@@ -60,8 +60,9 @@ reproducible fixture or controlled test.
   or approves that operation.
 - Merge `develop` into `main` only manually and only after CI passes.
 - PRs targeting `main` must come from `develop`.
-- A push to `main` triggers the automatic release pipeline. Releases use the
-  next patch version after the highest `vMAJOR.MINOR.PATCH` tag.
+- A push to `main` triggers the automatic release pipeline. Releases use
+  `vYEAR.MONTH.INCREMENT`, with UTC year/month and an increment starting at 1
+  for the current month.
 
 ## Security and format research
 
