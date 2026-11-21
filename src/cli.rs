@@ -122,6 +122,14 @@ pub(crate) struct UnpackArgs {
     /// VDFS1002: write an in-place TIFSDaemon negative-index patch to -o.
     #[arg(long)]
     pub(crate) patch_tif: bool,
+
+    /// VDFS1002: replace a catalog file in place by name.
+    #[arg(long, requires = "replacement", conflicts_with_all = ["patch_tif", "extract", "audit", "list"])]
+    pub(crate) replace_file: Option<String>,
+
+    /// VDFS1002: host file used by --replace-file.
+    #[arg(long, requires = "replace_file")]
+    pub(crate) replacement: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]

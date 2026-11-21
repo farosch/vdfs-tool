@@ -151,6 +151,21 @@ and requires `-o`. It writes a new in-place-patched image and verifies a
 round trip through the reader. It does not establish vendor trust,
 authorization, or device-side acceptance.
 
+### VDFS1002 in-place file replacement
+
+```sh
+vdfs-tool unpack platform.img \
+  --replace-file root/etc/config/resource_information15.xml \
+  --replacement resource_information15.xml \
+  -o replaced.img
+```
+
+`--replace-file` is an in-place VDFS1002 research mode. It rewrites an
+uncompressed file directly or rebuilds a zlib/gzip compressed CZip/Gzp blob,
+pins the descriptor layout and kernel CRC, and requires an exact logical
+round trip before writing the output image. The replacement must fit the
+original physical allocation.
+
 ## Pack
 
 Pack a host directory into the default VDFS4 layout-2007 image:

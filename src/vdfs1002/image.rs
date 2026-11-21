@@ -26,6 +26,54 @@ pub struct Image<'a> {
 }
 
 impl<'a> Image<'a> {
+    pub fn block_size(&self) -> u64 {
+        self.block_size
+    }
+
+    pub fn origin(&self) -> u64 {
+        self.origin
+    }
+
+    pub fn replace_file_blob_at(
+        block_size: u64,
+        origin: u64,
+        record: &CatalogRecord,
+        overflow: &Overflow,
+        image: &mut [u8],
+        replacement: &[u8],
+    ) -> Result<usize> {
+        if replacement.len() as u64 > record.size {
+            bail!(
+                "replacement size {} exceeds original file size {}",
+                replacement.len(),
+                record.size,
+            );
+        }
+        let mut written = 0usize;
+        for extent in file_extents(record, overflow)? {
+            let extent_bytes = extent.length.saturating_mul(block_size);
+            let remaining = replacement.len().saturating_sub(written);
+            let take = remaining.min(extent_bytes as usize);
+            if take > 0 {
+                let absolute = extent
+                    .begin
+                    .saturating_mul(block_size)
+                    .checked_add(origin)
+                    .context("replacement physical offset overflows")?;
+                let start = absolute as usize;
+                let end = start
+                    .checked_add(take)
+                    .context("replacement range overflows")?;
+                if end > image.len() {
+                    bail!("replacement range extends beyond the VDFS image");
+                }
+                image[start..end].copy_from_slice(&replacement[written..written + take]);
+                written += take;
+            }
+        }
+        Ok(written)
+    }
+
     pub fn open(data: &'a [u8]) -> Result<Self> {
         let mut errors = Vec::new();
         for layout in LAYOUTS {
@@ -330,45 +378,14 @@ impl<'a> Image<'a> {
         image: &mut [u8],
         replacement: &[u8],
     ) -> Result<usize> {
-        if replacement.len() as u64 > record.size {
-            bail!(
-                "replacement size {} exceeds original file size {}",
-                replacement.len(),
-                record.size,
-            );
-        }
-        let mut logical = 0u64;
-        let mut written = 0usize;
-        for extent in file_extents(record, overflow)? {
-            let extent_bytes = extent.length.saturating_mul(self.block_size);
-            let remaining = replacement.len().saturating_sub(written);
-            let take = remaining.min(extent_bytes as usize);
-            if take > 0 {
-                let absolute = extent
-                    .begin
-                    .saturating_mul(self.block_size)
-                    .checked_add(self.origin)
-                    .context("replacement physical offset overflows")?;
-                let start = absolute as usize;
-                let end = start
-                    .checked_add(take)
-                    .context("replacement range overflows")?;
-                if end > image.len() {
-                    bail!("replacement range extends beyond the VDFS image");
-                }
-                image[start..end].copy_from_slice(&replacement[written..written + take]);
-                written += take;
-            }
-            let padding = extent_bytes as usize - take;
-            if padding > 0 && written < replacement.len() {
-                logical = logical.saturating_add(extent_bytes);
-                continue;
-            }
-            if take > 0 {
-                logical = logical.saturating_add(take as u64);
-            }
-        }
-        Ok(written)
+        Self::replace_file_blob_at(
+            self.block_size,
+            self.origin,
+            record,
+            overflow,
+            image,
+            replacement,
+        )
     }
 
     /// Summarise how far the catalog reaches and whether file forks agree with their sizes.

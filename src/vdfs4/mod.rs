@@ -375,6 +375,8 @@ mod tests {
             extract: None,
             parent: None,
             patch_tif: false,
+            replace_file: None,
+            replacement: None,
         };
 
         let result = run(&[0u8; 2048], &args);

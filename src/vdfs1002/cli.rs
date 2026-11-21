@@ -2,26 +2,97 @@ use super::{Image, select_file};
 use crate::cli::UnpackArgs;
 use crate::crc::kernel_crc32;
 use anyhow::{Context, Result, bail};
-use flate2::{Compression, write::GzEncoder};
+use flate2::{
+    Compression,
+    write::{GzEncoder, ZlibEncoder},
+};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
+
+use super::codec::{compressed_descriptor, locate_chunk_table};
 
 const IGZP_LAYOUT: u16 = 4;
 const IGZP_GAP_BASE: usize = 144;
 const IGZP_TABLE_ENTRY: usize = 16;
 const IGZP_COUNT: usize = 1;
 
-pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
-    let modes = [args.audit, args.list, args.extract.is_some()]
-        .iter()
-        .filter(|set| **set)
-        .count();
-    if modes > 1 {
-        bail!("--audit, --list and --extract are mutually exclusive");
+pub(crate) fn recompress_file(raw: &[u8], logical: &[u8]) -> Result<Vec<u8>> {
+    let descriptor = compressed_descriptor(raw)?
+        .context("replacement target is not a supported compressed descriptor")?;
+    locate_chunk_table(raw, descriptor.start, descriptor.count as usize)?;
+
+    let compressed = match &descriptor.codec {
+        b"Gzp" => {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(logical)?;
+            encoder.finish()?
+        }
+        b"Zip" => {
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(logical)?;
+            encoder.finish()?
+        }
+        _ => bail!("replacement codec is not zlib or gzip"),
+    };
+    let descriptor_size = raw.len() - descriptor.start;
+    let replacement_table = raw
+        .len()
+        .checked_sub(descriptor_size)
+        .and_then(|start| start.checked_sub(16))
+        .context("replacement descriptor leaves no chunk-table entry")?;
+    if compressed.len() > replacement_table {
+        bail!(
+            "replacement compressed blob needs {} bytes but only {} fit before the descriptor",
+            compressed.len(),
+            replacement_table,
+        );
     }
-    if args.parent.is_some() && !args.list && args.extract.is_none() {
-        bail!("--parent needs --list or --extract");
+
+    let mut blob = vec![0u8; raw.len()];
+    blob[..compressed.len()].copy_from_slice(&compressed);
+    blob[replacement_table..replacement_table + 2].copy_from_slice(b"XT");
+    blob[replacement_table + 4..replacement_table + 8]
+        .copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+    blob[replacement_table + 8..replacement_table + 16].fill(0);
+
+    let start = raw.len() - descriptor_size;
+    blob[start] = raw[descriptor.start];
+    blob[start + 1..start + 4].copy_from_slice(&descriptor.codec);
+    blob[start + 4..start + 6].copy_from_slice(&1u16.to_le_bytes());
+    blob[start + 6..start + 8].copy_from_slice(&raw[descriptor.start + 6..descriptor.start + 8]);
+    blob[start + 8..start + 16].copy_from_slice(&(logical.len() as u64).to_le_bytes());
+    blob[start + 20..start + 24].copy_from_slice(&17u32.to_le_bytes());
+
+    let mut descriptor_tail = blob[start..start + descriptor_size].to_vec();
+    descriptor_tail[16..20].fill(0);
+    let crc = kernel_crc32(&[&blob[replacement_table..start], &descriptor_tail]);
+    blob[start + 16..start + 20].copy_from_slice(&crc.to_le_bytes());
+
+    let repaired_table =
+        locate_chunk_table(&blob, start, 1).context("replacement blob CRC validation failed")?;
+    if repaired_table != replacement_table {
+        bail!("replacement chunk table was not located at the expected offset");
+    }
+    Ok(blob)
+}
+
+pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
+    let modes = [
+        args.audit,
+        args.list,
+        args.extract.is_some(),
+        args.replace_file.is_some(),
+    ]
+    .iter()
+    .filter(|set| **set)
+    .count();
+    if modes > 1 {
+        bail!("--audit, --list, --extract and --replace-file are mutually exclusive");
+    }
+    if args.parent.is_some() && !args.list && args.extract.is_none() && args.replace_file.is_none()
+    {
+        bail!("--parent needs --list, --extract or --replace-file");
     }
     if modes > 0 && !args.include.is_empty() {
         bail!("--include is only supported by full VDFS1002 restoration");
@@ -139,6 +210,87 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(name) = args.replace_file.as_deref() {
+        let output = args
+            .output
+            .as_deref()
+            .context("--replace-file requires -o/--output")?;
+        let replacement_path = args
+            .replacement
+            .as_deref()
+            .context("--replace-file requires --replacement")?;
+        if output.exists() {
+            bail!("replacement output already exists: {}", output.display());
+        }
+        let replacement = std::fs::read(replacement_path).with_context(|| {
+            format!("Failed to read replacement {}", replacement_path.display())
+        })?;
+        let mut replacement_image = image_bytes.to_vec();
+        let reader = Image::open(&replacement_image)?;
+        let records = reader.catalog_records()?;
+        let record = select_file(&records, name, args.parent)?;
+        let overflow = reader.overflow_extents()?;
+        let raw = reader.read_file(record, &overflow, 256 << 20)?;
+        let block_size = reader.block_size();
+        let origin = reader.origin();
+        let blob = if compressed_descriptor(&raw)?.is_some() {
+            recompress_file(&raw, &replacement)?
+        } else {
+            if replacement.len() as u64 > record.size {
+                bail!(
+                    "replacement size {} exceeds original file size {}",
+                    replacement.len(),
+                    record.size,
+                );
+            }
+            let mut blob = vec![0u8; raw.len()];
+            blob[..replacement.len()].copy_from_slice(&replacement);
+            blob
+        };
+        if blob.len() as u64 > record.size {
+            bail!(
+                "replacement blob is {} bytes but the original file allocation is {} bytes",
+                blob.len(),
+                record.size,
+            );
+        }
+        drop(reader);
+        let written = Image::replace_file_blob_at(
+            block_size,
+            origin,
+            record,
+            &overflow,
+            &mut replacement_image,
+            &blob,
+        )?;
+        std::fs::write(output, &replacement_image)
+            .with_context(|| format!("Failed to write replacement image {}", output.display()))?;
+        let patched = std::fs::read(output)
+            .with_context(|| format!("Failed to reread replacement image {}", output.display()))?;
+        let patched_reader = Image::open(&patched)?;
+        let patched_records = patched_reader.catalog_records()?;
+        let patched_record = select_file(&patched_records, name, args.parent)?;
+        let patched_overflow = patched_reader.overflow_extents()?;
+        let restored = patched_reader.file_contents(patched_record, &patched_overflow)?;
+        if restored != replacement {
+            bail!(
+                "replacement round-trip mismatch: got {} bytes, expected {}",
+                restored.len(),
+                replacement.len(),
+            );
+        }
+        println!(
+            "{}",
+            serde_json::json!({
+                "output": output.display().to_string(),
+                "file": name,
+                "replacement_bytes": replacement.len(),
+                "physical_bytes": written,
+            })
+        );
+        return Ok(());
+    }
+
     let reader = Image::open(image_bytes)?;
 
     if args.audit {
@@ -237,7 +389,12 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{IGZP_COUNT, IGZP_GAP_BASE, IGZP_LAYOUT, IGZP_TABLE_ENTRY};
+    use super::{IGZP_COUNT, IGZP_GAP_BASE, IGZP_LAYOUT, IGZP_TABLE_ENTRY, recompress_file};
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
+
+    use super::super::codec::{compressed_descriptor, decompress_blob};
+    use crate::crc::kernel_crc32;
 
     #[test]
     fn synthetic_tif_igzp_uses_layout4() {
@@ -247,5 +404,35 @@ mod tests {
     #[test]
     fn synthetic_tif_igzp_gap_is_crc_pinned() {
         assert_eq!(IGZP_GAP_BASE + IGZP_TABLE_ENTRY * IGZP_COUNT, 160,);
+    }
+
+    #[test]
+    fn replaces_compressed_gzip_file_and_round_trips_crc() {
+        let original = b"<resourceinformationfile>old</resourceinformationfile>";
+        let replacement =
+            b"<resourceinformationfile>new-longer-resource-list</resourceinformationfile>";
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(original).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let mut raw = vec![0u8; 512];
+        raw[..compressed.len()].copy_from_slice(&compressed);
+        let table = 480 - 16;
+        raw[table..table + 2].copy_from_slice(b"XT");
+        raw[table + 4..table + 8].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+        raw[480..484].copy_from_slice(b"C?zp");
+        raw[480..481].copy_from_slice(b"C");
+        raw[481..484].copy_from_slice(b"Gzp");
+        raw[484..486].copy_from_slice(&1u16.to_le_bytes());
+        raw[486..488].copy_from_slice(&5u16.to_le_bytes());
+        raw[488..496].copy_from_slice(&(original.len() as u64).to_le_bytes());
+        let mut tail = raw[480..512].to_vec();
+        tail[16..20].fill(0);
+        let crc = kernel_crc32(&[&raw[table..480], &tail]);
+        raw[496..500].copy_from_slice(&crc.to_le_bytes());
+
+        let rebuilt = recompress_file(&raw, replacement).unwrap();
+        let descriptor = compressed_descriptor(&rebuilt).unwrap().unwrap();
+        let restored = decompress_blob(&rebuilt, &descriptor).unwrap();
+        assert_eq!(restored, replacement);
     }
 }

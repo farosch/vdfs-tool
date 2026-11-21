@@ -58,6 +58,11 @@ The reader accepts layouts 4 and 5. Regressions are:
 After writing a patched image, `--patch-tif` reopens it and requires the
 TIFSDaemon round trip to return the exact guarded logical payload.
 
+`unpack --replace-file` must preserve the original record allocation and
+descriptor layout. Compressed CZip/Gzp targets are rebuilt as one chunk,
+with the logical length and kernel CRC updated; zlib/gzip inflation and an
+exact output-byte round trip are mandatory before the image is emitted.
+
 Focused decompression tests (layout 5, layout 6, digests and AES):
 `cargo test --locked --bin vdfs-tool vdfs4::decompress`.
 Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
