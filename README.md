@@ -78,6 +78,8 @@ vdfs-tool unpack <image.img> -o <output-directory> --force
 | `--manifest-dir <DIR>` | Write VDFS4 catalog and xattr metadata manifest files |
 | `--aes-key <FILE>` | Read a 16-byte raw AES-128 key for encrypted VDFS4 chunks |
 | `--public-key <FILE>` | Read a PEM RSA public key for hashed VDFS4 descriptor verification |
+| `--trust-key <FILE>` | Add a PEM RSA public key trust anchor for this invocation |
+| `--trust-dir <DIR>` | Load PEM trust anchors from this directory for this invocation |
 
 Examples:
 
@@ -194,14 +196,25 @@ represent it. Unsupported special files are rejected.
 
 VDFS4 descriptor authentication supports layout-5 and layout-6
 RSA-PKCS1 v1.5 trailers, including MD5, SHA-1, SHA-256, RSA1024, and
-RSA2048. Provide the key with `--public-key`.
+RSA2048. VDFS4 superblocks also support host-side RSA1024 and RSA2048
+signature verification with SHA-1, SHA-256, or MD5.
 
-The tool does not currently provide vendor trust enrollment and does not
-verify VDFS4 superblock RSA signatures.
+Enroll persistent vendor trust anchors:
 
-VDFS1002 authentication, layout, trust-anchor, and device-side authorization
-behavior remain research areas. Do not interpret a successful host-side
-round trip as device authorization or a security bypass.
+```sh
+vdfs-tool trust enroll --label vendor.example --public-key vendor.pem
+vdfs-tool trust list
+```
+
+Use `--public-key`, `--trust-key`, or `--trust-dir` for invocation-specific
+verification. The default store is
+`$XDG_CONFIG_HOME/vdfs-tool/trust`, or `~/.config/vdfs-tool/trust` when
+`XDG_CONFIG_HOME` is unset.
+
+VDFS1002 descriptor and superblock RSA formats are not yet confirmed in this
+implementation. VDFS1002 audit output labels these checks as
+`format-not-confirmed`; a successful host-side round trip is not evidence of
+device authorization or a security bypass.
 
 ## Testing
 

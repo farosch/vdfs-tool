@@ -10,9 +10,17 @@ pub(crate) fn read_public_key(path: &std::path::Path) -> Result<RsaPublicKey> {
     let pem = std::fs::read(path)
         .with_context(|| format!("Failed to read RSA public key: {}", path.display()))?;
     let pem = std::str::from_utf8(&pem).context("RSA public key must be PEM text")?;
-    RsaPublicKey::from_public_key_pem(pem)
+    let key = RsaPublicKey::from_public_key_pem(pem)
         .or_else(|_| RsaPublicKey::from_pkcs1_pem(pem))
-        .with_context(|| format!("Failed to parse RSA public key: {}", path.display()))
+        .with_context(|| format!("Failed to parse RSA public key: {}", path.display()))?;
+    let bits = key.n().bits();
+    if !matches!(bits, 1024 | 2048) {
+        bail!(
+            "RSA public key must be RSA1024 or RSA2048: {}",
+            path.display()
+        );
+    }
+    Ok(key)
 }
 
 pub(crate) fn verify_signature(
@@ -27,7 +35,14 @@ pub(crate) fn verify_signature(
         b'h' => Sha256::digest(message).to_vec(),
         _ => bail!("Unsupported hashed descriptor authentication prefix"),
     };
+    verify_digest_signature(public_key, &digest, signature)
+}
 
+pub(crate) fn verify_digest_signature(
+    public_key: &RsaPublicKey,
+    digest: &[u8],
+    signature: &[u8],
+) -> Result<()> {
     let modulus = public_key.n();
     let exponent = public_key.e();
     let signature_int = rsa::BigUint::from_bytes_be(signature);
@@ -63,10 +78,32 @@ pub(crate) fn verify_signature(
     if encoded[separator] != 0 {
         bail!("RSA signature is missing PKCS#1 v1.5 separator");
     }
-    if encoded[digest_start..] != digest {
+    if encoded[digest_start..].as_ref() != digest {
         bail!("RSA signature digest mismatch");
     }
     Ok(())
+}
+
+pub(crate) fn verify_signature_any(
+    public_keys: &[RsaPublicKey],
+    message: &[u8],
+    signature: &[u8],
+    prefix: u8,
+) -> Result<()> {
+    if public_keys.is_empty() {
+        bail!("RSA signature verification requires at least one trusted public key");
+    }
+    let mut errors = Vec::new();
+    for public_key in public_keys {
+        match verify_signature(public_key, message, signature, prefix) {
+            Ok(()) => return Ok(()),
+            Err(error) => errors.push(format!("{error:#}")),
+        }
+    }
+    bail!(
+        "RSA signature did not verify against any trusted key: {}",
+        errors.join("; ")
+    )
 }
 
 #[cfg(test)]

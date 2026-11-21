@@ -3,6 +3,7 @@ mod crc;
 mod hex;
 mod lzo1x;
 mod pack;
+mod trust;
 mod vdfs1002;
 mod vdfs4;
 
@@ -14,6 +15,7 @@ fn main() -> Result<()> {
     match args.command {
         cli::Command::Unpack(args) => unpack(args),
         cli::Command::Pack(args) => pack::run(args),
+        cli::Command::Trust(args) => trust::run(args),
     }
 }
 

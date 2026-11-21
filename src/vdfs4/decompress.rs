@@ -203,11 +203,7 @@ pub fn decompress_file(
     }
     let data = extents_read_data(reader, &extents, 0, comp_total)?;
 
-    decompress_blob_keyed(
-        &data,
-        reader.aes_key.as_ref(),
-        reader.rsa_public_key.as_ref(),
-    )
+    decompress_blob_keyed(&data, reader.aes_key.as_ref(), &reader.rsa_public_keys)
 }
 
 // Layout-05 compressed descriptor (32 bytes; VDFS2006 images such as JazzM).
@@ -225,7 +221,7 @@ fn is_layout5_blob(data: &[u8]) -> bool {
     }
     let descriptor = data.len() - VDFS4_COMPR_FILE_DESC_LEN_05;
     let magic = &data[descriptor..descriptor + 4];
-    (magic[0] == b'C' || magic[0] == b'h')
+    matches!(magic[0], b'C' | b'I' | b'H' | b'h')
         && detect_compr_type(magic).is_some()
         && u16::from_le_bytes([data[descriptor + 6], data[descriptor + 7]])
             == VDFS4_COMPR_LAYOUT_VER_05
@@ -254,7 +250,7 @@ fn layout5_chunk(data: &[u8], table: usize, index: usize) -> Result<Layout5Chunk
     Ok(Layout5Chunk { flags, start, len })
 }
 
-fn decompress_layout5(data: &[u8], rsa_public_key: Option<&rsa::RsaPublicKey>) -> Result<Vec<u8>> {
+fn decompress_layout5(data: &[u8], rsa_public_keys: &[rsa::RsaPublicKey]) -> Result<Vec<u8>> {
     let descriptor = data.len() - VDFS4_COMPR_FILE_DESC_LEN_05;
     let magic = &data[descriptor..descriptor + 4];
     let ctype = detect_compr_type(magic).context("unknown compression type in descriptor")?;
@@ -313,12 +309,15 @@ fn decompress_layout5(data: &[u8], rsa_public_key: Option<&rsa::RsaPublicKey>) -
             Some(available) if available == 0 || available == 128 || available == 256 => available,
             _ => 0,
         };
-        if let Some(public_key) = rsa_public_key
-            && signature_len > 0
-        {
+        if !rsa_public_keys.is_empty() && signature_len > 0 {
             let signed = &data[table + 16 * count..table + 16 * count + digest_len * (count + 1)];
             let signature = &data[signature_offset..signature_offset + signature_len];
-            super::authentication::verify_signature(public_key, signed, signature, magic[0])?;
+            super::authentication::verify_signature_any(
+                rsa_public_keys,
+                signed,
+                signature,
+                magic[0],
+            )?;
         }
     }
 
@@ -375,6 +374,10 @@ mod layout5_tests {
     }
 
     fn blob(hashed: bool, signature_len: usize) -> (Vec<u8>, Vec<u8>) {
+        blob_with_prefix(if hashed { b'h' } else { b'C' }, signature_len)
+    }
+
+    fn blob_with_prefix(prefix: u8, signature_len: usize) -> (Vec<u8>, Vec<u8>) {
         let first = b"stored chunk".to_vec();
         let second = b"zlib chunk, physically after the stored one".to_vec();
         let compressed = zlib(&second);
@@ -393,16 +396,17 @@ mod layout5_tests {
             data.extend_from_slice(&(start as u64).to_le_bytes());
         }
         let mut descriptor = [0u8; 32];
-        descriptor[0] = if hashed { b'h' } else { b'C' };
+        descriptor[0] = prefix;
         descriptor[1..4].copy_from_slice(b"Zip");
         descriptor[4..6].copy_from_slice(&2u16.to_le_bytes());
         descriptor[6..8].copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_05.to_le_bytes());
         descriptor[8..16].copy_from_slice(&((first.len() + second.len()) as u64).to_le_bytes());
         descriptor[20..24].copy_from_slice(&17u32.to_le_bytes());
-        if hashed {
-            data.extend_from_slice(&Sha256::digest(&first));
-            data.extend_from_slice(&Sha256::digest(&compressed));
-            data.extend_from_slice(&Sha256::digest(&descriptor[..16]));
+        let algo = DigestAlgo::from_magic(prefix).unwrap();
+        if let Some(algo) = algo {
+            data.extend_from_slice(&algo.digest(&first));
+            data.extend_from_slice(&algo.digest(&compressed));
+            data.extend_from_slice(&algo.digest(&descriptor[..16]));
             data.resize(data.len() + signature_len, 0xa5);
         }
         data.extend_from_slice(&descriptor);
@@ -418,6 +422,26 @@ mod layout5_tests {
             assert!(is_layout5_blob(&data));
             assert_eq!(decompress_blob(&data).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn decodes_md5_layout5_with_stored_and_compressed_chunks() {
+        for signature_len in [0, 128, 256] {
+            let (data, expected) = blob_with_prefix(b'I', signature_len);
+            assert!(is_layout5_blob(&data));
+            assert_eq!(decompress_blob(&data).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn rejects_f_descriptor_authentication_prefix() {
+        let (mut data, _) = blob(true, 0);
+        let descriptor = data.len() - 32;
+        data[descriptor] = b'F';
+        assert_eq!(
+            decompress_blob(&data).unwrap_err().to_string(),
+            "Unsupported descriptor authentication type"
+        );
     }
 
     #[test]
@@ -600,16 +624,16 @@ fn decrypt_chunk(
 
 #[cfg(test)]
 fn decompress_blob(data: &[u8]) -> Result<Vec<u8>> {
-    decompress_blob_keyed(data, None, None)
+    decompress_blob_keyed(data, None, &[])
 }
 
 fn decompress_blob_keyed(
     data: &[u8],
     key: Option<&AesKey>,
-    rsa_public_key: Option<&rsa::RsaPublicKey>,
+    rsa_public_keys: &[rsa::RsaPublicKey],
 ) -> Result<Vec<u8>> {
     if is_layout5_blob(data) {
-        return decompress_layout5(data, rsa_public_key);
+        return decompress_layout5(data, rsa_public_keys);
     }
     let descr_offset =
         find_descriptor(data).context("Could not locate compressed file descriptor")?;
@@ -657,9 +681,7 @@ fn decompress_blob_keyed(
         if hash.as_slice() != &data[start..start + digest_len] {
             bail!("Compressed descriptor digest mismatch");
         }
-        if let Some(public_key) = rsa_public_key
-            && matches!(descr.sign_type, 1 | 2)
-        {
+        if matches!(descr.sign_type, 1 | 2) && !rsa_public_keys.is_empty() {
             let signed_len = digest_len * (comp_extents_count + 1);
             let signature_len = match descr.sign_type {
                 1 => 128,
@@ -675,8 +697,8 @@ fn decompress_blob_keyed(
             if signature_end > descr_offset {
                 bail!("RSA signature exceeds compressed descriptor");
             }
-            super::authentication::verify_signature(
-                public_key,
+            super::authentication::verify_signature_any(
+                rsa_public_keys,
                 &data[hash_offset..signed_end],
                 &data[signed_end..signature_end],
                 descr.magic[0],

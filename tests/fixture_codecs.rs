@@ -49,7 +49,9 @@ fn extract(name: &str, file: &str) -> PathBuf {
 #[test]
 fn extracts_codec_fixture_contents() {
     for (name, file, tag) in FIXTURES {
-        let image = fs::read(fixture_path(file)).unwrap();
+        let path = fixture_path(file);
+        let image = fs::read(&path)
+            .unwrap_or_else(|error| panic!("{name}: failed to read {}: {error}", path.display()));
         assert!(
             image.windows(3).any(|w| w == tag),
             "{name}: image has no {} descriptor",

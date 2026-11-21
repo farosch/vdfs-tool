@@ -20,12 +20,22 @@ support remains format-specific open work.
 VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
 v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
 SHA-1, SHA-256, RSA1024, and RSA2048 descriptor trailers. It does not provide
-vendor trust enrollment or verify superblock signatures.
+device authorization claims.
+
+VDFS4 superblocks can be verified against RSA1024 or RSA2048 public keys using
+SHA-1, SHA-256, or MD5 as selected by the on-disk hash type. Trust anchors may
+be supplied with `--public-key`, `--trust-key`, or `--trust-dir`, or enrolled
+persistently with `vdfs-tool trust enroll`.
+
+VDFS1002 descriptor and superblock RSA verification remains unsupported until
+its signature layouts are confirmed by a real fixture. VDFS1002 audit output
+reports this status explicitly and must not be interpreted as device
+authorization.
 
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (105 passing unit tests + 1 ignored survey, plus integration fixtures)
+cargo test --locked                  # all tests (112 passing unit tests + 1 ignored survey, plus integration fixtures)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -51,6 +61,9 @@ Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
 signature blocks, corrupt stored hashes, and changed codec/size fields that
 must fail the digest check before decompression. The unhashed size-mismatch
 test continues to exercise the output-length check independently of hashing.
+VDFS4 authentication prefixes are resolved: `C` is unhashed, `I` MD5, `H`
+SHA-1 and `h` SHA-256. No `F` authentication prefix is defined by the upstream
+VDFS4 format; it is rejected by `DigestAlgo::from_magic`.
 
 Layout-5 CRC regressions cover the table, optional signature block, stored
 CRC, chunk-size field and padding, plus an unhashed payload change that the
