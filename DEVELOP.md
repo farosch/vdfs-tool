@@ -26,10 +26,12 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 `VDFS1002_SURVEY_IMAGE=<image> cargo test --release --locked -- --ignored survey_compressed_descriptors --nocapture`.
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
-`unpack --patch-tif` synthesizes one zlib CZip chunk for `TIFSDaemon` and pins
-the resulting live-compatible VDFS1002 descriptor to layout 5. The reader
-accepts both layouts 4 and 5. Regressions are:
-`cargo test --locked --bin vdfs-tool synthetic_tif_czip_uses_layout5` and
+`unpack --patch-tif` preserves the original `IGzp` codec and pins the
+live-compatible VDFS1002 descriptor to layout 4. The synthetic one-chunk table
+uses the IGzp gap formula `144 + 16*count`, giving a 160-byte gap for count 1.
+The reader accepts layouts 4 and 5. Regressions are:
+`cargo test --locked --bin vdfs-tool synthetic_tif_igzp_uses_layout4`,
+`cargo test --locked --bin vdfs-tool synthetic_tif_igzp_gap_is_crc_pinned`, and
 `cargo test --locked --bin vdfs-tool accepts_layout5_descriptor`.
 After writing a patched image, `--patch-tif` reopens it and requires the
 TIFSDaemon round trip to return the exact guarded logical payload.

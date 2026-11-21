@@ -2,12 +2,15 @@ use super::{Image, select_file};
 use crate::cli::UnpackArgs;
 use crate::crc::kernel_crc32;
 use anyhow::{Context, Result, bail};
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::{Compression, write::GzEncoder};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 
-const CZIP_LAYOUT: u16 = 5;
+const IGZP_LAYOUT: u16 = 4;
+const IGZP_GAP_BASE: usize = 144;
+const IGZP_TABLE_ENTRY: usize = 16;
+const IGZP_COUNT: usize = 1;
 
 pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     let modes = [args.audit, args.list, args.extract.is_some()]
@@ -56,7 +59,7 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         logical[at_count..at_count + 2].copy_from_slice(b"\x00\x29");
         logical[at_bmi..at_bmi + 2].copy_from_slice(b"\x35\xd4");
 
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&logical)?;
         let compressed = encoder.finish()?;
         eprintln!(
@@ -66,7 +69,12 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
             raw.len()
         );
         let blob_size = raw.len();
-        let table = blob_size - 48;
+        let gap = IGZP_GAP_BASE + IGZP_TABLE_ENTRY * IGZP_COUNT;
+        let table = blob_size
+            .checked_sub(32)
+            .and_then(|value| value.checked_sub(gap))
+            .and_then(|value| value.checked_sub(IGZP_TABLE_ENTRY))
+            .context("TIF raw blob is too small for IGzp layout")?;
         if compressed.len() > table {
             bail!(
                 "patched compressed blob needs {} bytes, but original object has {} bytes before the table",
@@ -80,10 +88,10 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
         blob[table + 2..table + 4].copy_from_slice(&0u16.to_le_bytes());
         blob[table + 4..table + 8].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
         blob[table + 8..table + 16].copy_from_slice(&0u64.to_le_bytes());
-        let descriptor = table + 16;
-        blob[descriptor..descriptor + 4].copy_from_slice(b"CZip");
+        let descriptor = blob_size - 32;
+        blob[descriptor..descriptor + 4].copy_from_slice(b"IGzp");
         blob[descriptor + 4..descriptor + 6].copy_from_slice(&1u16.to_le_bytes());
-        blob[descriptor + 6..descriptor + 8].copy_from_slice(&CZIP_LAYOUT.to_le_bytes());
+        blob[descriptor + 6..descriptor + 8].copy_from_slice(&IGZP_LAYOUT.to_le_bytes());
         blob[descriptor + 8..descriptor + 16]
             .copy_from_slice(&(logical.len() as u64).to_le_bytes());
         blob[descriptor + 16..descriptor + 20].fill(0);
@@ -112,8 +120,8 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
                 logical.len(),
             );
         }
-        if blob[descriptor + 6..descriptor + 8] != CZIP_LAYOUT.to_le_bytes() {
-            bail!("patched TIFSDaemon descriptor layout is not layout {CZIP_LAYOUT}");
+        if blob[descriptor + 6..descriptor + 8] != IGZP_LAYOUT.to_le_bytes() {
+            bail!("patched TIFSDaemon descriptor layout is not layout {IGZP_LAYOUT}");
         }
         println!(
             "{}",
@@ -224,10 +232,15 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::CZIP_LAYOUT;
+    use super::{IGZP_COUNT, IGZP_GAP_BASE, IGZP_LAYOUT, IGZP_TABLE_ENTRY};
 
     #[test]
-    fn synthetic_tif_czip_uses_layout5() {
-        assert_eq!(CZIP_LAYOUT, 5);
+    fn synthetic_tif_igzp_uses_layout4() {
+        assert_eq!(IGZP_LAYOUT, 4);
+    }
+
+    #[test]
+    fn synthetic_tif_igzp_gap_is_crc_pinned() {
+        assert_eq!(IGZP_GAP_BASE + IGZP_TABLE_ENTRY * IGZP_COUNT, 160,);
     }
 }

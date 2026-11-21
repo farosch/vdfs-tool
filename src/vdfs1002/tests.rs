@@ -1023,6 +1023,7 @@ const HARD_CATEGORIES: [&str; 5] = [
 struct Verdict {
     category: &'static str,
     gap: Option<usize>,
+    layout: Option<u16>,
     note: String,
 }
 
@@ -1031,6 +1032,7 @@ impl Verdict {
         Self {
             category,
             gap: None,
+            layout: None,
             note: String::new(),
         }
     }
@@ -1039,6 +1041,7 @@ impl Verdict {
         Self {
             category,
             gap: None,
+            layout: None,
             note,
         }
     }
@@ -1116,6 +1119,10 @@ fn classify(image: &Image<'_>, record: &CatalogRecord, overflow: &Overflow) -> V
                 _ => "decoded_other",
             },
             gap: Some(gap),
+            layout: Some(u16::from_le_bytes([
+                blob[descriptor.start + 6],
+                blob[descriptor.start + 7],
+            ])),
             note: String::new(),
         },
         Err(error) => Verdict::with_note("decode_error", format!("{error:#}")),
@@ -1127,6 +1134,8 @@ struct Survey {
     bodies: u64,
     counts: std::collections::BTreeMap<&'static str, u64>,
     gaps: std::collections::BTreeMap<usize, u64>,
+    layouts: std::collections::BTreeMap<u16, u64>,
+    layout5_names: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -1136,6 +1145,15 @@ impl Survey {
         *self.counts.entry(verdict.category).or_default() += 1;
         if let Some(gap) = verdict.gap {
             *self.gaps.entry(gap).or_default() += 1;
+        }
+        if let Some(layout) = verdict.layout {
+            *self.layouts.entry(layout).or_default() += 1;
+            if layout == 5 {
+                self.layout5_names.push(format!(
+                    "layout5\tobject {object_id}\t{}",
+                    String::from_utf8_lossy(name),
+                ));
+            }
         }
         let flagged = HARD_CATEGORIES.contains(&verdict.category)
             || matches!(
@@ -1167,6 +1185,14 @@ impl Survey {
         println!("table gap (bytes: decoded descriptors):");
         for (gap, count) in &self.gaps {
             println!("  {gap}: {count}");
+        }
+        println!("descriptor layouts:");
+        for (layout, count) in &self.layouts {
+            println!("  {layout}: {count}");
+        }
+        println!("layout 5 objects:");
+        for name in &self.layout5_names {
+            println!("{name}");
         }
         for note in &self.notes {
             println!("{note}");
