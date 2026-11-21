@@ -35,7 +35,7 @@ authorization.
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (110 passing unit tests + 1 ignored survey, plus integration fixtures)
+cargo test --locked                  # all tests (112 passing unit tests + 1 ignored survey, plus integration fixtures)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -61,6 +61,9 @@ Layout-5 tests include valid descriptor-prefix hashes with 0/128/256-byte
 signature blocks, corrupt stored hashes, and changed codec/size fields that
 must fail the digest check before decompression. The unhashed size-mismatch
 test continues to exercise the output-length check independently of hashing.
+VDFS4 authentication prefixes are resolved: `C` is unhashed, `I` MD5, `H`
+SHA-1 and `h` SHA-256. No `F` authentication prefix is defined by the upstream
+VDFS4 format; it is rejected by `DigestAlgo::from_magic`.
 
 Layout-5 CRC regressions cover the table, optional signature block, stored
 CRC, chunk-size field and padding, plus an unhashed payload change that the

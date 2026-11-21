@@ -22,9 +22,6 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   Host-side RSA1024/2048 and SHA-1/SHA-256/MD5 verification plus local trust
   enrollment are implemented; preserve this only as a real-fixture/device-trust
   validation lead, not an implementation gap.
-- Find retail VDFS2006/2007 samples with `F`. `F` support needs a confirmed
-  format and regression fixture before implementation. VDFS1002 `I` samples
-  do not establish VDFS4 `I` behavior.
 
 ## Format-specific parity gaps
 

@@ -20,12 +20,17 @@ fn write_key(name: &str, key: &[u8; 16]) -> PathBuf {
 fn run_extract(name: &str, key: Option<&Path>) -> (Output, PathBuf) {
     let out = std::env::temp_dir().join(format!("vdfs-unpack-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&out);
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_vdfs-tool"));
+    let binary = env!("CARGO_BIN_EXE_vdfs-tool");
+    let mut cmd = Command::new(binary);
     cmd.arg("unpack").arg(FIXTURE).arg("-o").arg(&out);
     if let Some(key) = key {
         cmd.arg("--aes-key").arg(key);
     }
-    (cmd.output().expect("failed to run vdfs-unpack"), out)
+    (
+        cmd.output()
+            .unwrap_or_else(|error| panic!("failed to run {binary}: {error}")),
+        out,
+    )
 }
 
 #[test]

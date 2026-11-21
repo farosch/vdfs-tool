@@ -221,7 +221,7 @@ fn is_layout5_blob(data: &[u8]) -> bool {
     }
     let descriptor = data.len() - VDFS4_COMPR_FILE_DESC_LEN_05;
     let magic = &data[descriptor..descriptor + 4];
-    (magic[0] == b'C' || magic[0] == b'h')
+    matches!(magic[0], b'C' | b'I' | b'H' | b'h')
         && detect_compr_type(magic).is_some()
         && u16::from_le_bytes([data[descriptor + 6], data[descriptor + 7]])
             == VDFS4_COMPR_LAYOUT_VER_05
@@ -374,6 +374,10 @@ mod layout5_tests {
     }
 
     fn blob(hashed: bool, signature_len: usize) -> (Vec<u8>, Vec<u8>) {
+        blob_with_prefix(if hashed { b'h' } else { b'C' }, signature_len)
+    }
+
+    fn blob_with_prefix(prefix: u8, signature_len: usize) -> (Vec<u8>, Vec<u8>) {
         let first = b"stored chunk".to_vec();
         let second = b"zlib chunk, physically after the stored one".to_vec();
         let compressed = zlib(&second);
@@ -392,16 +396,17 @@ mod layout5_tests {
             data.extend_from_slice(&(start as u64).to_le_bytes());
         }
         let mut descriptor = [0u8; 32];
-        descriptor[0] = if hashed { b'h' } else { b'C' };
+        descriptor[0] = prefix;
         descriptor[1..4].copy_from_slice(b"Zip");
         descriptor[4..6].copy_from_slice(&2u16.to_le_bytes());
         descriptor[6..8].copy_from_slice(&VDFS4_COMPR_LAYOUT_VER_05.to_le_bytes());
         descriptor[8..16].copy_from_slice(&((first.len() + second.len()) as u64).to_le_bytes());
         descriptor[20..24].copy_from_slice(&17u32.to_le_bytes());
-        if hashed {
-            data.extend_from_slice(&Sha256::digest(&first));
-            data.extend_from_slice(&Sha256::digest(&compressed));
-            data.extend_from_slice(&Sha256::digest(&descriptor[..16]));
+        let algo = DigestAlgo::from_magic(prefix).unwrap();
+        if let Some(algo) = algo {
+            data.extend_from_slice(&algo.digest(&first));
+            data.extend_from_slice(&algo.digest(&compressed));
+            data.extend_from_slice(&algo.digest(&descriptor[..16]));
             data.resize(data.len() + signature_len, 0xa5);
         }
         data.extend_from_slice(&descriptor);
@@ -417,6 +422,26 @@ mod layout5_tests {
             assert!(is_layout5_blob(&data));
             assert_eq!(decompress_blob(&data).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn decodes_md5_layout5_with_stored_and_compressed_chunks() {
+        for signature_len in [0, 128, 256] {
+            let (data, expected) = blob_with_prefix(b'I', signature_len);
+            assert!(is_layout5_blob(&data));
+            assert_eq!(decompress_blob(&data).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn rejects_f_descriptor_authentication_prefix() {
+        let (mut data, _) = blob(true, 0);
+        let descriptor = data.len() - 32;
+        data[descriptor] = b'F';
+        assert_eq!(
+            decompress_blob(&data).unwrap_err().to_string(),
+            "Unsupported descriptor authentication type"
+        );
     }
 
     #[test]
