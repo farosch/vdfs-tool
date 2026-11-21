@@ -3,7 +3,7 @@ name = "vdfs-tool"
 version = "0.1.4"
 edition = "2024"
 description = "Samsung VDFS4 and VDFS1002 filesystem image packer and unpacker"
-license = "Apache-2.0"
+license = "GPL-2.0-or-later"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

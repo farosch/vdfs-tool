@@ -1,5 +1,7 @@
 # Developing vdfs-tool
 
+This project is licensed under GPL-2.0-or-later; see [LICENSE](LICENSE).
+
 Native VDFS4 packing is implemented for layout 2007. `pack` supports inline
 and extent-backed regular files, directories, symlinks, and `none`, `zlib`,
 `gzip`, `zstd`, and `lzo` compression.
