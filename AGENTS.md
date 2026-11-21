@@ -30,6 +30,9 @@ cargo test --locked
 cargo clippy --locked --all-targets
 ```
 
+Cross-platform build changes must keep Unix-only dependencies and APIs behind
+`cfg(unix)` or target-specific Cargo dependencies.
+
 Always pass `--locked`. Use `cargo fmt` to apply formatting, and keep new code
 free of Clippy warnings. Update the test count in [DEVELOP.md](DEVELOP.md)
 when the unit-test count changes.
