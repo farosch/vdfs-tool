@@ -813,14 +813,14 @@ fn rejects_corrupted_chunk_table_before_inflating() {
 }
 
 #[test]
-fn rejects_unsupported_descriptor_layout() {
+fn accepts_layout5_descriptor() {
     let blob = with_descriptor(&gzip(b"abc"), 3, b"Gzp", 5);
     let data = readme_image(&fork(blob.len() as u64, 1, &[(3, 1)]), vec![(3, blob)]);
     let image = Image::open(&data).unwrap();
     let record = readme(&data);
-    assert!(
-        error_text(image.file_contents(&record, &no_overflow()))
-            .contains("unsupported compressed descriptor layout 5")
+    assert_eq!(
+        image.file_contents(&record, &no_overflow()).unwrap(),
+        b"abc"
     );
 }
 

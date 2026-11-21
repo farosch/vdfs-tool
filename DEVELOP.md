@@ -27,8 +27,10 @@ The compressed-descriptor survey is ignored by default because it needs a real i
 It lists the outcome of every file body and fails on any read, CRC, descriptor or decode error.
 
 `unpack --patch-tif` synthesizes one zlib CZip chunk for `TIFSDaemon` and pins
-the resulting descriptor to layout 5. Its regression test is:
-`cargo test --locked --bin vdfs-tool synthetic_tif_czip_uses_layout5`.
+the resulting live-compatible VDFS1002 descriptor to layout 5. The reader
+accepts both layouts 4 and 5. Regressions are:
+`cargo test --locked --bin vdfs-tool synthetic_tif_czip_uses_layout5` and
+`cargo test --locked --bin vdfs-tool accepts_layout5_descriptor`.
 
 Focused decompression tests (layout 5, layout 6, digests and AES):
 `cargo test --locked --bin vdfs-tool vdfs4::decompress`.

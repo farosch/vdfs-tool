@@ -5,7 +5,8 @@ use flate2::read::{GzDecoder, ZlibDecoder};
 
 use super::format::{
     COMPRESSED_CRC_OFFSET, COMPRESSED_DESCRIPTOR_SIZE, COMPRESSED_FLAG_STORED, COMPRESSED_LAYOUT,
-    COMPRESSED_MAX_TABLE_GAP, COMPRESSED_TABLE_ENTRY, MAX_READ_BYTES, le_u16, le_u32, le_u64,
+    COMPRESSED_LAYOUT_5, COMPRESSED_MAX_TABLE_GAP, COMPRESSED_TABLE_ENTRY, MAX_READ_BYTES, le_u16,
+    le_u32, le_u64,
 };
 use crate::crc::kernel_crc32;
 
@@ -31,7 +32,7 @@ pub(super) fn compressed_descriptor(blob: &[u8]) -> Result<Option<CompressedDesc
     let count = le_u16(blob, start + 4)?;
     let layout = le_u16(blob, start + 6)?;
     let unpacked = le_u64(blob, start + 8)?;
-    if layout != COMPRESSED_LAYOUT {
+    if layout != COMPRESSED_LAYOUT && layout != COMPRESSED_LAYOUT_5 {
         bail!("unsupported compressed descriptor layout {layout}");
     }
     Ok(Some(CompressedDescriptor {
