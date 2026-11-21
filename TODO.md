@@ -11,7 +11,7 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   `144 + 16*count` (160 bytes), round-trips exactly, and a live synthetic
   boot passed layout/CRC decompression. Validate the same behavior across
   additional real layout-4 objects and nontrivial chunk counts.
-- Complete layout-5 real-image support. The reader now accepts layout-5
+- Confirm layout-5 real-image compatibility. The reader accepts layout-5
   descriptors and has synthetic coverage, but HawkM p22 survey evidence found
   45,285 layout-4 descriptors and no original layout-5 objects. Preserve layout
   5 support and obtain a confirmed layout-5 real-image fixture before claiming
@@ -29,7 +29,8 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   discrepancy before claiming device-side verification.
 - Confirm VDFS4 superblock RSA verification against a signed retail fixture.
   Host-side RSA1024/2048 and SHA-1/SHA-256/MD5 verification plus local trust
-  enrollment are implemented, but this does not establish device authorization.
+  enrollment are implemented; preserve this only as a real-fixture/device-trust
+  validation lead, not an implementation gap.
 - Find retail VDFS2006/2007 samples with `F`. `F` support needs a confirmed
   format and regression fixture before implementation. VDFS1002 `I` samples
   do not establish VDFS4 `I` behavior.
