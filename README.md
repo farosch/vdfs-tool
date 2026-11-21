@@ -196,13 +196,6 @@ VDFS4 descriptor authentication supports layout-5 and layout-6
 RSA-PKCS1 v1.5 trailers, including MD5, SHA-1, SHA-256, RSA1024, and
 RSA2048. Provide the key with `--public-key`.
 
-The tool does not currently provide vendor trust enrollment and does not
-verify VDFS4 superblock RSA signatures.
-
-VDFS1002 authentication, layout, trust-anchor, and device-side authorization
-behavior remain research areas. Do not interpret a successful host-side
-round trip as device authorization or a security bypass.
-
 ## Testing
 
 ```sh
