@@ -33,6 +33,17 @@ fixture provenance are in [DEVELOP.md](DEVELOP.md).
   format and regression fixture before implementation. VDFS1002 `I` samples
   do not establish VDFS4 `I` behavior.
 
+## Format-specific parity gaps
+
+- Establish whether VDFS1002 stores AES-encrypted file bodies and, if so,
+  implement `--aes-key` with confirmed encryption and nonce layouts.
+- Define and validate a VDFS1002 manifest/xattr representation. VDFS4's
+  `entries.tsv`, `catalog.bin`, and `xattrs.bin` formats do not establish
+  VDFS1002 catalog or extended-attribute layout.
+- Determine whether VDFS1002 descriptor signatures or superblock signatures
+  are independently verifiable. VDFS4 RSA descriptor support does not establish
+  VDFS1002 trust or vendor-key behavior.
+
 ## Overflow extents
 
 - Confirm VDFS1002 inode 5 records against an image with nonempty overflow

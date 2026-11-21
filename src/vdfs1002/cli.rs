@@ -23,16 +23,15 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     if args.parent.is_some() && !args.list && args.extract.is_none() {
         bail!("--parent needs --list or --extract");
     }
-    if modes == 0
-        && (!args.include.is_empty()
-            || args.manifest_dir.is_some()
-            || args.aes_key.is_some()
-            || args.public_key.is_some())
-    {
-        bail!(
-            "--include, --manifest-dir, --aes-key and --public-key are not supported for VDFS1002 images"
-        );
+    if modes > 0 && !args.include.is_empty() {
+        bail!("--include is only supported by full VDFS1002 restoration");
     }
+    if modes == 0
+        && (args.manifest_dir.is_some() || args.aes_key.is_some() || args.public_key.is_some())
+    {
+        bail!("--manifest-dir, --aes-key and --public-key are not supported for VDFS1002 images");
+    }
+    super::validate_selection(&args.include)?;
 
     if args.patch_tif {
         let output = args
@@ -202,7 +201,7 @@ pub(crate) fn run(image_bytes: &mut [u8], args: &UnpackArgs) -> Result<()> {
     }
     println!("VDFS1002 Image");
     println!("Extracting to: {}", output_dir.display());
-    let summary = super::restore(image_bytes, &output_dir)?;
+    let summary = super::restore_selected(image_bytes, &output_dir, &args.include)?;
     if !summary.extended_checksum_valid {
         eprintln!("  Warning: extended record checksum mismatch");
     }

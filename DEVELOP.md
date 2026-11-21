@@ -12,6 +12,10 @@ leaf, and extent-backed file records.
 
 Unpacking refuses an existing VDFS4 or VDFS1002 output path. Packing rejects
 `--layout 2006` with `--format vdfs1002` because VDFS1002 is not layout 2006.
+Both formats provide `--list`, `--list --json`, `--audit`, `--extract`,
+`--parent`, and selected-subtree restore behavior. VDFS4 additionally provides
+`--manifest-dir` and AES key handling; VDFS1002 manifest/AES/RSA descriptor
+support remains format-specific open work.
 
 VDFS4 descriptor authentication can verify layout-5 and layout-6 RSA-PKCS1
 v1.5 signature trailers with `--public-key <PEM>`. The verifier supports MD5,
@@ -21,7 +25,7 @@ vendor trust enrollment or verify superblock signatures.
 ## Test and build
 
 ```sh
-cargo test --locked                  # all tests (104 passing unit tests + 1 ignored survey, plus integration fixtures)
+cargo test --locked                  # all tests (105 passing unit tests + 1 ignored survey, plus integration fixtures)
 cargo build --release --locked       # ./target/release/vdfs-tool
 cargo fmt --check                    # formatting (rustup component add rustfmt)
 cargo clippy --locked --all-targets  # lints (rustup component add clippy)
@@ -77,18 +81,28 @@ JazzM sample with `--include root/dev` and
 output directory. Repeat with `--manifest-dir` pointing to a fresh metadata
 directory; compare the node outputs and the corresponding `ENTRY` records.
 
-Always pass `--locked`; `Cargo.lock` is pinned. CI (`.github/workflows/test.yml`)
-runs `cargo test --locked` on pull requests into `main` and `develop` and on
-pushes to `develop`. A pull request into `main` must come from `develop`; the
-`verify-source` job always runs and reports success outside that rule or fails
-otherwise.
+Always pass `--locked`; `Cargo.lock` is pinned.
 
-Release (`.github/workflows/release.yml`) runs on every push to `main`. It runs
-the tests, then builds `vdfs-tool` for `x86_64-unknown-linux-gnu`,
-`x86_64-pc-windows-msvc`, `aarch64-apple-darwin` and `x86_64-apple-darwin`. It
-publishes a GitHub release tagged `v<version>` from the `version` field in
-`Cargo.toml`. If that tag already exists, the release is skipped, so bump the
-version before merging a release.
+## Branch and release workflow
+
+- Never commit directly to `main` or `develop`.
+- Create a feature branch from `develop`.
+- Submit every change as a pull request targeting `develop`.
+- CI (`.github/workflows/test.yml`) runs formatting, tests, and Clippy for pull
+  requests into `develop` and `main`.
+- Pull requests into `develop` must come from a feature branch, never `main`
+  or `develop`.
+- Merge approved work to `develop` by pull request. Do not open pull requests
+  that change the repository while the user has not explicitly approved PR
+  creation.
+- Merge `develop` into `main` manually only after all tests pass.
+- Pull requests into `main` must come from `develop`.
+- A push to `main` runs the release pipeline
+  (`.github/workflows/release.yml`), builds all release targets, and creates a
+  GitHub release automatically.
+- The release version is the next patch version after the highest existing
+  `vMAJOR.MINOR.PATCH` tag. It is applied to `Cargo.toml`, `Cargo.lock`, and
+  the binaries without changing or committing the source version in place.
 
 
 Coding rules (module layout, error handling, tests, comments) are in

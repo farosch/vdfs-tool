@@ -14,6 +14,34 @@ each format.
 | VDFS4 | 2007 | Yes | Yes |
 | VDFS1002 | Native | Yes | Yes |
 
+### Feature parity
+
+| Feature | VDFS4 | VDFS1002 |
+|---|:---:|:---:|
+| Full directory restore | Yes | Yes |
+| Regular files | Yes | Yes |
+| Directories | Yes | Yes |
+| Symlinks | Yes | Yes |
+| Hard links | Yes | Yes |
+| Inline forks | Yes | Yes |
+| Extent-backed files | Yes | Yes |
+| Selected-path extraction | Yes | Yes |
+| Manifest/xattr export | Yes | No |
+| AES encrypted chunks | Yes | No |
+| RSA descriptor verification | Yes | No |
+| Catalog listing and JSON audit | Yes | Yes |
+| Single-file extraction and `--parent` | Yes | Yes |
+| Layout-specific packing | 2006 and 2007 | Native only |
+| Compression packing | None, zlib, gzip, lzo, zstd | None, zlib, gzip, lzo, zstd |
+| Superblock RSA verification | No | N/A |
+
+VDFS4 and VDFS1002 share core file, directory, symlink, hard-link, inline-fork,
+extent, and compression support, but they expose different format-specific
+workflows. Both formats support catalog listing, JSON audit, single-file
+extraction, and selected-subtree restoration. VDFS4 additionally provides
+manifest/xattr export and AES key support. VDFS1002 manifest, AES, and RSA
+descriptor formats remain open until their on-disk structures are confirmed.
+
 ## Build
 
 Use the checked-in lockfile:
@@ -64,6 +92,16 @@ VDFS4 extraction restores regular files, directories, symlinks, hard-link
 names, inline data, and extent-backed data. It can also emit catalog records
 and xattrs in manifest mode.
 
+VDFS4 images support the same catalog-read workflows as VDFS1002:
+
+```sh
+vdfs-tool unpack firmware.img --list
+vdfs-tool unpack firmware.img --list --json
+vdfs-tool unpack firmware.img --audit
+vdfs-tool unpack firmware.img --extract hello.txt -o hello.txt
+vdfs-tool unpack firmware.img --extract hello.txt --parent 12345 -o hello.txt
+```
+
 ### VDFS1002 read options
 
 VDFS1002 images support catalog listing, audit, and single-file extraction:
@@ -87,6 +125,13 @@ vdfs-tool unpack platform.img --extract README.md --parent 12345 -o README.md
 
 Use `--parent <OBJECT_ID>` with `--list` or `--extract` to restrict matching
 to a parent object ID.
+
+Use `--include <PATH>` repeatedly for a selected VDFS1002 restore. Selected
+folders retain their ancestors and restore the complete selected subtree:
+
+```sh
+vdfs-tool unpack platform.img -o selected --include root/usr --include root/etc
+```
 
 VDFS1002 normal unpack restores the catalog tree under a new destination.
 The output may contain regular files, directories, symlinks, hard-link names,
@@ -170,6 +215,17 @@ Test fixtures, real-image validation limits, build instructions, and
 ignored survey tests are documented in [DEVELOP.md](DEVELOP.md).
 
 Open implementation and validation work is tracked in [TODO.md](TODO.md).
+
+## Development and releases
+
+Do not commit directly to `main` or `develop`. Create a feature branch and
+submit a pull request to `develop`. After merging approved changes into
+`develop`, merge `develop` into `main` manually.
+
+Pull requests targeting `develop` run formatting, tests, and Clippy. A push to
+`main` runs the full test and cross-platform release pipeline. Releases use
+the next patch version after the highest existing `vMAJOR.MINOR.PATCH` tag,
+without requiring a manual `Cargo.toml` version bump.
 
 ## License
 
